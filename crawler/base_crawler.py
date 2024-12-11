@@ -38,7 +38,8 @@ class BaseCrawler(ABC):
         print(">>> crawling step 2/2")
         for article_url in tqdm(self.article_links):
             article_data = self.crawl_articles(article_url)
-            data.append(article_data)
+            if article_data:
+                data.append(article_data)
 
         self.quit_driver()
         return data
