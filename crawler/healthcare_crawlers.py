@@ -41,12 +41,42 @@ class AMCMealTherapyCrawler(BaseCrawler):
         keywords_list = self.driver.find_elements(By.CSS_SELECTOR, 'div.contBox > dl > dd')
         keywords = [elem.text for elem in keywords_list]
 
-        # 본문 추출
-        article_content = self.driver.find_element(By.CSS_SELECTOR, 'div.contDescription > dl.descDl').text
+        # 본문 element 전체 추출
+        try:
+            content_div = self.driver.find_element(By.CSS_SELECTOR, 'dl.descDl')
+        except NoSuchElementException:
+            print(f">>> {article_url}에서 dl.descDl를 찾지 못함")
+            return None
+        elements = content_div.find_elements(By.XPATH, "./*")
+
+        # 본문 내 element별로 처리
+        processed_content = []
+        for element in elements:
+            tag_name = element.tag_name
+            if tag_name == 'dt':
+                # heading 태그 처리
+                heading_text = element.text.strip()
+                processed_content.append(f"\n### {heading_text}")
+            elif tag_name == 'dd':
+                inner_text = element.text.strip()
+                if inner_text:
+                    processed_content.append(inner_text)
+                try:
+                    inner_elem = element.find_element(By.TAG_NAME, "img")
+                    img_src = inner_elem.get_attribute('src')
+                    if img_src:
+                        local_image_path = self.download_image(img_src)
+                        if local_image_path:
+                            img_info = f"**관련 이미지 저장 경로**: {local_image_path}"
+                            processed_content.append(img_info)
+                except NoSuchElementException:
+                    pass
+        
+        combined_content = "\n".join(processed_content)
 
         # LangChain Documents 호환 JSON 형식
         return {
-            "page_content": article_content,
+            "page_content": combined_content,
             "metadata": {
                 "title": title,
                 "source_url": article_url,
