@@ -94,28 +94,6 @@ class SSHDiabetesCrawler(BaseCrawler):
         print(">>> crawling step 1/2")
         for li_elem in tqdm(li_elems):
             self.article_links.append(li_elem.get_attribute('href'))
-
-    def download_image(self, image_url):
-        # image_url에서 이미지를 다운로드한 후 로컬 경로 반환
-        image_save_dir = './res/crawled_images'
-        os.makedirs(image_save_dir, exist_ok=True)
-        image_name = os.path.basename(image_url)
-        save_path = os.path.join(image_save_dir, image_name)
-
-        if os.path.exists(save_path):
-            return save_path
-        else:
-            try:
-                response = requests.get(image_url, stream=True)
-                if response.status_code == 200:
-                    with open(save_path, 'wb') as f:
-                        for chunk in response.iter_content(1024):
-                            f.write(chunk)
-                    print(f"이미지 다운로드 성공: {save_path}")
-                    return save_path
-            except Exception as e:
-                print(f"이미지 다운로드 실패: {e}")
-            return None
         
     def crawl_articles(self, article_url):
         self.driver.get(article_url)
