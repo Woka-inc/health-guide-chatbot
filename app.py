@@ -13,7 +13,6 @@ def crawl_and_save(crawler, save_path, force_crawl=False, **kwargs):
         print(f">>> 이미 존재하는 파일이 있습니다: {save_path} -> 새로 크롤링하지 않고 기존 데이터를 사용합니다.")
         return
 
-    print(f">>> {crawler.__class__.__name__} 실행 중...")
     crawler_instance = crawler(**kwargs) if kwargs else crawler()
     articles = crawler_instance.run()
     json_saver = JsonSaver()
