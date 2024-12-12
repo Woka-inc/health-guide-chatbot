@@ -84,8 +84,11 @@ def main():
     # RAG 3. Indexing: Embed documents, set retriever
     retriever = create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 2})
 
-    # RAG 4. Retrieval and Generation 
+    # RAG 4. Retrieval
     user_query = "나 저혈압이래!! 어쩐지 머리가 핑핑 돌더라니.. 앞으로 식사를 어떻게 챙겨먹어야 좋을까?"
+    retrieved_documents = retriever.search_docs(user_query)
+
+    # RAG 5. Generate
     rag_prompt_template = """당신은 사용자의 건강 상태와 상황을 이해하고, 공신력 있는 근거 자료를 바탕으로 깊이 있고 실질적인 건강 정보를 제공하는 전문가 AI 챗봇입니다. 
 사용자의 질문에 대해 다음 기준을 따라 답변하세요:
 
@@ -154,7 +157,6 @@ def main():
         ("system", rag_prompt_template),
         ("user", user_query)
     ]
-    retrieved_documents = retriever.search_docs(user_query)
     rag_chain = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
     response = rag_chain.get_response(message_inputs=[user_query, retrieved_documents], session_id=1)
     print("<<< 응답 >>>\n", response)
