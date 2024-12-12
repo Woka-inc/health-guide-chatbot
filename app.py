@@ -4,6 +4,8 @@ from data_loader.structured_data_loader import JsonLoader
 from model.retriever import FAISSBM25Retriever
 from preprocessor.structured_data import json_to_langchain_doclist
 
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 from dotenv import load_dotenv
 import os
 
@@ -35,6 +37,11 @@ def crawl_and_update(crawl_tasks, force_crawl:bool):
             force_crawl=force_crawl,
             **task["kwargs"]
         )
+
+def split_documents(documents, chunk_size, overlap):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=overlap, length_function=len)
+    split_result = text_splitter.split_documents(documents)
+    return split_result
 
 def create_retriever(retriever, documents, **kwargs):
     # retriever 클래스와 임베딩할 documents를 넘겨받아 retriever 생성
@@ -68,7 +75,12 @@ def main():
         json_doc = json_loader.load(path)
         documents += json_to_langchain_doclist(json_doc)
     
-    # RAG 2. Embed documents, set retriever
+    # RAG 2. Split Documents
+    splitted_documents = split_documents(documents, 
+                                    chunk_size=300, 
+                                    overlap=100)
+    
+    # RAG 3. Embed documents, set retriever
     retriever = create_retriever(FAISSBM25Retriever, documents, **{"openai_api_key": openai_api_key, "top_k": 1})
 
 if __name__ == "__main__":
