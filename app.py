@@ -21,7 +21,7 @@ def crawl_and_save(crawler, save_path, force_crawl=False, **kwargs):
 
 def crawl_and_update(openai_api_key:str, force_crawl:bool):
     """
-    구현해둔 크롤러들로 res의 json문서들을 업데이트
+    실행할 크롤러를 명시, res의 json문서들을 업데이트
     main에서 호출됨
     """
     tasks = [
