@@ -1,6 +1,7 @@
 from crawler.healthcare_crawlers import AMCMealTherapyCrawler, SSHDiabetesCrawler
 from data_loader.data_saver import JsonSaver
 from data_loader.structured_data_loader import JsonLoader
+from model.retriever import FAISSBM25Retriever
 from preprocessor.structured_data import json_to_langchain_doclist
 
 from dotenv import load_dotenv
@@ -35,6 +36,11 @@ def crawl_and_update(crawl_tasks, force_crawl:bool):
             **task["kwargs"]
         )
 
+def create_retriever(retriever, documents, **kwargs):
+    # retriever 클래스와 임베딩할 documents를 넘겨받아 retriever 생성
+    retriever_instance = retriever(documents, **kwargs) if kwargs else retriever(documents)
+    return retriever_instance
+
 def main():
     load_dotenv()
     openai_api_key = os.getenv('OPENAI_API_KEY')
@@ -61,6 +67,9 @@ def main():
     for path in json_doc_paths:
         json_doc = json_loader.load(path)
         documents += json_to_langchain_doclist(json_doc)
+    
+    # RAG 2. Embed documents, set retriever
+    retriever = create_retriever(FAISSBM25Retriever, documents, **{"openai_api_key": openai_api_key, "top_k": 1})
 
 if __name__ == "__main__":
     main()
