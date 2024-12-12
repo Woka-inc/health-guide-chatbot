@@ -7,8 +7,12 @@ from preprocessor.structured_data import json_to_langchain_doclist
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
+import streamlit as st
 from dotenv import load_dotenv
 import os
+
+# st.session_state 목록
+# - OPENAI_API_KEY: 모델에 사용할 OpenAI API Key. 환경변수로부터 로드하거나 사용자에게 입력 받음
 
 def crawl_and_save(crawler, save_path, force_crawl=False, **kwargs):
     """
@@ -49,9 +53,18 @@ def create_retriever(retriever, documents, **kwargs):
     retriever_instance = retriever(documents, **kwargs) if kwargs else retriever(documents)
     return retriever_instance
 
+@st.dialog("OpenAI API Key 요청")
+def ask_openai_api_key():
+    st.write("챗봇을 사용하기 위해 OpenAI의 API Key가 필요합니다.")
+    st.write("\'확인\'버튼을 누른 후 잠시만 기다려주세요.")
+    key = st.text_input("your api key here")
+    if st.button("확인") and key:
+        st.session_state['OPENAI_API_KEY']
+        print(">>> OPENAI_API_KEY: 사용자로부터 입력 받음")
+        st.rerun()
+
 def main():
-    load_dotenv()
-    openai_api_key = os.getenv('OPENAI_API_KEY')
+    openai_api_key = st.session_state['OPENAI_API_KEY']
 
     # RAG 0. Crawl Data
     crawl_tasks = [
@@ -162,4 +175,16 @@ def main():
     print("<<< 응답 >>>\n", response)
 
 if __name__ == "__main__":
-    main()
+    # 프로그램 시작 시 .env 등을 통해 전달된 OPENAI_API_KEY가 st.session_state에 있는지 확인
+    if 'OPENAI_API_KEY' in st.session_state:
+        main()
+    else:
+        load_dotenv()
+        OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+        if OPENAI_API_KEY:
+            # 환경변수에 저장된 키가 있다면 불러오기
+            st.session_state['OPENAI_API_KEY'] = OPENAI_API_KEY
+            print(">>> OPENAI_API_KEY: 환경변수에서 로드")
+            main()
+        else:
+            ask_openai_api_key()
