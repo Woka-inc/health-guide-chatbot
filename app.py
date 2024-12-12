@@ -13,6 +13,10 @@ import os
 
 # st.session_state 목록
 # - OPENAI_API_KEY: 모델에 사용할 OpenAI API Key. 환경변수로부터 로드하거나 사용자에게 입력 받음
+# - retriever: user_query를 입력받아 관련 문서를 검색. set_retriever에서 생성
+# - rag_chain: set_chain에서 prompt template 정의 후 생성한 chain.
+# - query: 사용자의 질문을 저장하는 리스트
+# - generated: 사용자의 질문에 대해 생성된 모델의 응답을 저장하는 리스트
 
 def crawl_and_save(crawler, save_path, force_crawl=False, **kwargs):
     """
@@ -64,45 +68,43 @@ def ask_openai_api_key():
         st.rerun()
 
 def main():
-    openai_api_key = st.session_state['OPENAI_API_KEY']
-
-    # RAG 0. Crawl Data
-    crawl_tasks = [
-        {
-            "crawler": AMCMealTherapyCrawler,
-            "save_path": './res/amc-mealtherapy.json',
-            "kwargs": {}
-        },
-        {
-            "crawler": SSHDiabetesCrawler,
-            "save_path": './res/ssh-diabetes.json',
-            "kwargs": {"api_key": openai_api_key}
-        }
-    ]
-    # crawl_and_update(crawl_tasks, force_crawl=False) 
+    def set_retriever():
+        """RAG 0~3: 문서로드~검색기 생성"""
+        # RAG 0. Crawl Data
+        crawl_tasks = [
+            {
+                "crawler": AMCMealTherapyCrawler,
+                "save_path": './res/amc-mealtherapy.json',
+                "kwargs": {}
+            },
+            {
+                "crawler": SSHDiabetesCrawler,
+                "save_path": './res/ssh-diabetes.json',
+                "kwargs": {"api_key": openai_api_key}
+            }
+        ]
+        crawl_and_update(crawl_tasks, force_crawl=False) 
+        
+        # RAG 1. Load Data
+        json_doc_paths = [crawler['save_path'] for crawler in crawl_tasks]
+        json_loader = JsonLoader()
+        documents = []
+        for path in json_doc_paths:
+            json_doc = json_loader.load(path)
+            documents += json_to_langchain_doclist(json_doc)
+        
+        # RAG 2. Split Documents
+        splitted_documents = split_documents(documents, 
+                                        chunk_size=300, 
+                                        overlap=100)
+        
+        # RAG 3. Indexing: Embed documents, set retriever
+        st.session_state['retriever'] = create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 2})
     
-    # RAG 1. Load Data
-    json_doc_paths = [crawler['save_path'] for crawler in crawl_tasks]
-    json_loader = JsonLoader()
-    documents = []
-    for path in json_doc_paths:
-        json_doc = json_loader.load(path)
-        documents += json_to_langchain_doclist(json_doc)
-    
-    # RAG 2. Split Documents
-    splitted_documents = split_documents(documents, 
-                                    chunk_size=300, 
-                                    overlap=100)
-    
-    # RAG 3. Indexing: Embed documents, set retriever
-    retriever = create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 2})
-
-    # RAG 4. Retrieval
-    user_query = "나 저혈압이래!! 어쩐지 머리가 핑핑 돌더라니.. 앞으로 식사를 어떻게 챙겨먹어야 좋을까?"
-    retrieved_documents = retriever.search_docs(user_query)
-
-    # RAG 5. Generate
-    rag_prompt_template = """당신은 사용자의 건강 상태와 상황을 이해하고, 공신력 있는 근거 자료를 바탕으로 깊이 있고 실질적인 건강 정보를 제공하는 전문가 AI 챗봇입니다. 
+    def set_chain():
+        """RAG 3.5: chain 생성"""
+        # RAG 3.5. setup chain
+        rag_prompt_template = """당신은 사용자의 건강 상태와 상황을 이해하고, 공신력 있는 근거 자료를 바탕으로 깊이 있고 실질적인 건강 정보를 제공하는 전문가 AI 챗봇입니다. 
 사용자의 질문에 대해 다음 기준을 따라 답변하세요:
 
 1. **근거 자료 기반 응답**:  
@@ -166,13 +168,49 @@ def main():
 <<< 이전 사용자와 챗봇의 대화 내용 >>>
 {chat_history}
 """
-    prompt_message = [
-        ("system", rag_prompt_template),
-        ("user", user_query)
-    ]
-    rag_chain = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
-    response = rag_chain.get_response(message_inputs=[user_query, retrieved_documents], session_id=1)
-    print("<<< 응답 >>>\n", response)
+        prompt_message = [
+            ("system", rag_prompt_template)
+        ]
+        st.session_state['rag_chain'] = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
+
+    def generate_chat(user_query):
+        """RAG 4~5: 검색 & 응답생성"""
+        # RAG 4. Retrieval
+        retrieved_documents = st.session_state['retriever'].search_docs(user_query)
+        # RAG 5. Generate
+        response = st.session_state['rag_chain'].get_response(message_inputs=[user_query, retrieved_documents], session_id=1)
+        # session_state에 채팅 추가
+        st.session_state['query'].append(user_query)
+        st.session_state['generated'].append(response)
+
+    print(">>> main() 실행")
+    openai_api_key = st.session_state['OPENAI_API_KEY']
+
+    # retriever, chain 초기화 ----------------------------------
+    if 'retriever' not in st.session_state:
+        set_retriever()
+    if 'chain' not in st.session_state:
+        set_chain()
+
+    # 채팅 session_state 초기화 ----------------------------------
+    session_state_chat_keys = ['query', 'generated']
+    for chat_key in session_state_chat_keys:
+        if chat_key not in st.session_state:
+            st.session_state[chat_key] = []
+    
+    # Streamlit UI - 초기 채팅 화면 ----------------------------------
+    st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
+    st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
+    chat_container = st.container()
+    with chat_container:
+        st.chat_message("ai").write("특정 질환에 대해 궁금한 내용이 있거나, 현재 건강에 대해 걱정되는 점이 있다면 알려주세요! 😊")
+        if st.session_state['generated']:
+            for i in range(len(st.session_state['generated'])):
+                st.chat_message("user").write(st.session_state['query'][i])
+                st.chat_message("ai").write(st.session_state['generated'][i])
+    user_input = st.chat_input("궁금한 점을 입력하세요.")
+    if user_input:
+        generate_chat(user_input)
 
 if __name__ == "__main__":
     # 프로그램 시작 시 .env 등을 통해 전달된 OPENAI_API_KEY가 st.session_state에 있는지 확인
