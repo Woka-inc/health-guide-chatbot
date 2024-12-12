@@ -38,7 +38,7 @@ class RAGChain(BaseOpenAIChain):
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         if session_id not in self.session_storage:
             self.session_storage[session_id] = InMemoryChatMessageHistory()
-            return self.session_storage[session_id ]
+            return self.session_storage[session_id]
         
         # memory 객체로 불러오기
         memory = ConversationBufferMemory(
@@ -58,7 +58,7 @@ class RAGChain(BaseOpenAIChain):
             for idx in range(len(message_inputs)):
                 message_query_dict[self.message_input_keys[idx]] = message_inputs[idx]
         else:
-            print("message에 포함된 input keys의 개수와 전달된 input query의 개수가 다릅니다.") 
+            raise ValueError("message에 포함된 input keys의 개수와 전달된 input query의 개수가 다릅니다.")
 
         # self.chain에 MessageHistory 추가
         with_msg_history = RunnableWithMessageHistory(
