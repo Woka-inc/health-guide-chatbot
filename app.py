@@ -80,8 +80,8 @@ def main():
                                     chunk_size=300, 
                                     overlap=100)
     
-    # RAG 3. Embed documents, set retriever
-    retriever = create_retriever(FAISSBM25Retriever, documents, **{"openai_api_key": openai_api_key, "top_k": 1})
+    # RAG 3. Indexing: Embed documents, set retriever
+    retriever = create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 1})
 
 if __name__ == "__main__":
     main()
