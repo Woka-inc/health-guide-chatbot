@@ -78,3 +78,39 @@ class UserTableManager(BaseTableManager):
             print(f">>> MySQL Error: {e}")
         finally:
             self.close()
+
+class ChatLogTableManager(BaseTableManager):
+    def __init__(self):
+        super().__init__()
+
+    def create_chat_title(self, session_id, user_id, chat_title):
+        self.connect()
+
+        sql = """
+        INSERT INTO chat_title (session_id, user_id, title)
+        VALUES (%s, %s, %s)
+        """
+        values = (session_id, user_id, chat_title)
+        try:
+            self.cursor.execute(sql, values)
+            self.connection.commit()
+        except pymysql.MySQLError as e:
+            print(f">>> MySQL Error: {e}")
+        finally:
+            self.close()
+    
+    def insert_chat_log(self, session_id, user_id, sender, message):
+        self.connect()
+
+        sql = """
+        INSERT INTO chat_log (session_id, user_id, sender, message)
+        VALUES (%s, %s, %s, %s)
+        """
+        values = (session_id, user_id, sender, message)
+        try:
+            self.cursor.execute(sql, values)
+            self.connection.commit()
+        except pymysql.MySQLError as e:
+            print(f">>> MySQL Error: {e}")
+        finally:
+            self.close()

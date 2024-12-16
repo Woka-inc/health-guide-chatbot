@@ -4,7 +4,7 @@ from data_loader.structured_data_loader import JsonLoader
 from model.retriever import FAISSBM25Retriever
 from model.openai_langchain import RAGChain
 from preprocessor.structured_data import json_to_langchain_doclist
-from database.table_manager import UserTableManager
+from database.table_manager import UserTableManager, ChatLogTableManager
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -79,6 +79,7 @@ def user_login(db_user):
         user_info = db_user.check_user(username, email)
         if user_info:
             st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+            st.session_state['session_id'] = 1  # !!!! session_id 갱신방법 수정 필요함
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
         else:
@@ -95,8 +96,28 @@ def user_join(db_user):
         db_user.create_user(username, email)
         user_info = db_user.check_user(username, email)
         st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+        st.session_state['session_id'] = 1  # !!!! session_id 갱신방법 수정 필요함
         db_user.update_last_login(st.session_state['user']['id'])
         st.rerun()
+
+@st.dialog("대화 저장하기")
+def archive_chat(db_chatlog):
+    st.write("대화 내용을 저장할 제목을 입력해주세요.")
+    chat_title = st.text_input(label='chat title')
+    btn = st.button("저장하기")
+    session_id = st.session_state['session_id']
+    user_id = st.session_state['user']['id']
+    if chat_title and btn:
+        # 채팅목록 추가 in chat_title
+        db_chatlog.create_chat_title(session_id, user_id, chat_title)
+        # 채팅 내용 저장 in chat_log
+        for i in range(len(st.session_state['query'])):
+            db_chatlog.insert_chat_log(session_id, user_id, 'user', st.session_state['query'][i])
+            db_chatlog.insert_chat_log(session_id, user_id, 'bot', st.session_state['generated'][i])
+        # 현재 대화 초기화
+        st.session_state['query'] = []
+        st.session_state['generated'] = []
+        # session_id 갱신 필요
 
 def main():
     def set_retriever():
@@ -214,18 +235,6 @@ def main():
         st.session_state['query'].append(user_query)
         st.session_state['generated'].append(response)
 
-    def show_chat_ui():
-        chat_container = st.container()
-        with chat_container:
-            st.chat_message("ai").write("특정 질환에 대해 궁금한 내용이 있거나, 현재 건강에 대해 걱정되는 점이 있다면 알려주세요! 😊")
-            if st.session_state['generated']:
-                for i in range(len(st.session_state['generated'])):
-                    st.chat_message("user").write(st.session_state['query'][i])
-                    st.chat_message("ai").write(st.session_state['generated'][i])
-        user_input = st.chat_input("궁금한 점을 입력하세요.")
-        if user_input:
-            generate_chat(user_input)
-
     print(">>> main() 실행")
     openai_api_key = st.session_state['OPENAI_API_KEY']
 
@@ -237,6 +246,7 @@ def main():
     
     # database table manager 초기화
     db_user = UserTableManager()
+    db_chatlog = ChatLogTableManager()
 
     # 채팅 session_state 초기화 ----------------------------------
     session_state_chat_keys = ['query', 'generated']
@@ -248,11 +258,15 @@ def main():
     with st.sidebar:
         if st.button("로그아웃"):
             del st.session_state['user']
-    
+
+        if st.button("대화 내용 저장하고 새로 시작하기"):
+            archive_chat(db_chatlog)
+
     # Streamlit UI - 메인 화면 ----------------------------------
     st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
     st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
     if 'user' not in st.session_state:
+        # 로그인 정보가 없을 때 화면
         st.markdown("<p style='text-align: center;'>이용을 위해 로그인해주세요!</p>", unsafe_allow_html=True)
         btn_cols = st.columns(2)
         login_btn = btn_cols[0].button("Log in", type="primary", use_container_width=True)
@@ -262,7 +276,17 @@ def main():
         if join_btn:
             user_join(db_user)
     else:
-        show_chat_ui()
+        # 로그인 정보가 있을 때 채팅 화면
+        chat_container = st.container()
+        with chat_container:
+            st.chat_message("ai").write("특정 질환에 대해 궁금한 내용이 있거나, 현재 건강에 대해 걱정되는 점이 있다면 알려주세요! 😊")
+            if st.session_state['generated']:
+                for i in range(len(st.session_state['generated'])):
+                    st.chat_message("user").write(st.session_state['query'][i])
+                    st.chat_message("ai").write(st.session_state['generated'][i])
+        user_input = st.chat_input("궁금한 점을 입력하세요.")
+        if user_input:
+            generate_chat(user_input)
 
 if __name__ == "__main__":
     # 프로그램 시작 시 .env 등을 통해 전달된 OPENAI_API_KEY가 st.session_state에 있는지 확인
