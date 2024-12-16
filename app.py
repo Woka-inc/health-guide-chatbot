@@ -4,6 +4,7 @@ from data_loader.structured_data_loader import JsonLoader
 from model.retriever import FAISSBM25Retriever
 from model.openai_langchain import RAGChain
 from preprocessor.structured_data import json_to_langchain_doclist
+from database.table_manager import UserTableManager
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -65,6 +66,31 @@ def ask_openai_api_key():
     if st.button("확인") and key:
         st.session_state['OPENAI_API_KEY']
         print(">>> OPENAI_API_KEY: 사용자로부터 입력 받음")
+        st.rerun()
+
+@st.dialog("Log in")
+def user_login(db_user):
+    st.markdown("<span style='font-weight: bold;'>username</span>", unsafe_allow_html=True)
+    username = st.text_input(label='username', label_visibility="collapsed")
+    st.markdown("<span style='font-weight: bold;'>email</span>", unsafe_allow_html=True)
+    email = st.text_input(label='email', label_visibility="collapsed")
+    btn = st.button("login")
+    if username and email and btn:
+        user_info = db_user.check_user(username, email)
+        st.session_state['user'] = {'user_id': user_info[0], 'user_name': user_info[1]}
+        st.rerun()
+
+@st.dialog("Join")
+def user_join(db_user):
+    st.markdown("<span style='font-weight: bold;'>username</span>", unsafe_allow_html=True)
+    username = st.text_input(label='username', placeholder="10자 이내, 필수", label_visibility="collapsed")
+    st.markdown("<span style='font-weight: bold;'>email</span>", unsafe_allow_html=True)
+    email = st.text_input(label='email', placeholder="필수", label_visibility="collapsed")
+    btn = st.button("join and login")
+    if username and email and btn:
+        db_user.create_user(username, email)
+        user_info = db_user.check_user(username, email)
+        st.session_state['user'] = {'user_id': user_info[0], 'user_name': user_info[1]}
         st.rerun()
 
 def main():
@@ -183,6 +209,18 @@ def main():
         st.session_state['query'].append(user_query)
         st.session_state['generated'].append(response)
 
+    def show_chat_ui():
+        chat_container = st.container()
+        with chat_container:
+            st.chat_message("ai").write("특정 질환에 대해 궁금한 내용이 있거나, 현재 건강에 대해 걱정되는 점이 있다면 알려주세요! 😊")
+            if st.session_state['generated']:
+                for i in range(len(st.session_state['generated'])):
+                    st.chat_message("user").write(st.session_state['query'][i])
+                    st.chat_message("ai").write(st.session_state['generated'][i])
+        user_input = st.chat_input("궁금한 점을 입력하세요.")
+        if user_input:
+            generate_chat(user_input)
+
     print(">>> main() 실행")
     openai_api_key = st.session_state['OPENAI_API_KEY']
 
@@ -191,26 +229,35 @@ def main():
         set_retriever()
     if 'chain' not in st.session_state:
         set_chain()
+    
+    # database table manager 초기화
+    db_user = UserTableManager()
 
     # 채팅 session_state 초기화 ----------------------------------
     session_state_chat_keys = ['query', 'generated']
     for chat_key in session_state_chat_keys:
         if chat_key not in st.session_state:
             st.session_state[chat_key] = []
+
+    # Streamlit UI - 사이드바 ----------------------------------
+    with st.sidebar:
+        if st.button("로그아웃"):
+            del st.session_state['user']
     
-    # Streamlit UI - 초기 채팅 화면 ----------------------------------
+    # Streamlit UI - 메인 화면 ----------------------------------
     st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
     st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
-    chat_container = st.container()
-    with chat_container:
-        st.chat_message("ai").write("특정 질환에 대해 궁금한 내용이 있거나, 현재 건강에 대해 걱정되는 점이 있다면 알려주세요! 😊")
-        if st.session_state['generated']:
-            for i in range(len(st.session_state['generated'])):
-                st.chat_message("user").write(st.session_state['query'][i])
-                st.chat_message("ai").write(st.session_state['generated'][i])
-    user_input = st.chat_input("궁금한 점을 입력하세요.")
-    if user_input:
-        generate_chat(user_input)
+    if 'user' not in st.session_state:
+        st.markdown("<p style='text-align: center;'>이용을 위해 로그인해주세요!</p>", unsafe_allow_html=True)
+        btn_cols = st.columns(2)
+        login_btn = btn_cols[0].button("Log in", type="primary", use_container_width=True)
+        join_btn = btn_cols[1].button("Join", use_container_width=True)
+        if login_btn:
+            user_login(db_user)
+        if join_btn:
+            user_join(db_user)
+    else:
+        show_chat_ui()
 
 if __name__ == "__main__":
     # 프로그램 시작 시 .env 등을 통해 전달된 OPENAI_API_KEY가 st.session_state에 있는지 확인
