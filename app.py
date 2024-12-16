@@ -69,7 +69,7 @@ def ask_openai_api_key():
         st.rerun()
 
 @st.dialog("Log in")
-def user_login(db_user):
+def user_login(db_user, db_chatlog):
     st.markdown("<span style='font-weight: bold;'>username</span>", unsafe_allow_html=True)
     username = st.text_input(label='username', label_visibility="collapsed")
     st.markdown("<span style='font-weight: bold;'>email</span>", unsafe_allow_html=True)
@@ -79,14 +79,14 @@ def user_login(db_user):
         user_info = db_user.check_user(username, email)
         if user_info:
             st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
-            st.session_state['session_id'] = 1  # !!!! session_id 갱신방법 수정 필요함
+            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
         else:
             st.markdown("<span style='color:red;'>username과 email을 다시 확인해주세요.</span>", unsafe_allow_html=True)
 
 @st.dialog("Join")
-def user_join(db_user):
+def user_join(db_user, db_chatlog):
     st.markdown("<span style='font-weight: bold;'>username</span>", unsafe_allow_html=True)
     username = st.text_input(label='username', placeholder="10자 이내, 필수", label_visibility="collapsed")
     st.markdown("<span style='font-weight: bold;'>email</span>", unsafe_allow_html=True)
@@ -96,7 +96,7 @@ def user_join(db_user):
         db_user.create_user(username, email)
         user_info = db_user.check_user(username, email)
         st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
-        st.session_state['session_id'] = 1  # !!!! session_id 갱신방법 수정 필요함
+        st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
         db_user.update_last_login(st.session_state['user']['id'])
         st.rerun()
 
@@ -117,7 +117,7 @@ def archive_chat(db_chatlog):
         # 현재 대화 초기화
         st.session_state['query'] = []
         st.session_state['generated'] = []
-        # session_id 갱신 필요
+        st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
 
 def main():
     def set_retriever():
@@ -230,7 +230,7 @@ def main():
         # RAG 4. Retrieval
         retrieved_documents = st.session_state['retriever'].search_docs(user_query)
         # RAG 5. Generate
-        response = st.session_state['rag_chain'].get_response(message_inputs=[user_query, retrieved_documents], session_id=1)
+        response = st.session_state['rag_chain'].get_response(message_inputs=[user_query, retrieved_documents], session_id=st.session_state['session_id'])
         # session_state에 채팅 추가
         st.session_state['query'].append(user_query)
         st.session_state['generated'].append(response)
@@ -272,9 +272,9 @@ def main():
         login_btn = btn_cols[0].button("Log in", type="primary", use_container_width=True)
         join_btn = btn_cols[1].button("Join", use_container_width=True)
         if login_btn:
-            user_login(db_user)
+            user_login(db_user, db_chatlog)
         if join_btn:
-            user_join(db_user)
+            user_join(db_user, db_chatlog)
     else:
         # 로그인 정보가 있을 때 채팅 화면
         chat_container = st.container()

@@ -85,7 +85,6 @@ class ChatLogTableManager(BaseTableManager):
 
     def create_chat_title(self, session_id, user_id, chat_title):
         self.connect()
-
         sql = """
         INSERT INTO chat_title (session_id, user_id, title)
         VALUES (%s, %s, %s)
@@ -101,7 +100,6 @@ class ChatLogTableManager(BaseTableManager):
     
     def insert_chat_log(self, session_id, user_id, sender, message):
         self.connect()
-
         sql = """
         INSERT INTO chat_log (session_id, user_id, sender, message)
         VALUES (%s, %s, %s, %s)
@@ -112,5 +110,24 @@ class ChatLogTableManager(BaseTableManager):
             self.connection.commit()
         except pymysql.MySQLError as e:
             print(f">>> MySQL Error: {e}")
+        finally:
+            self.close()
+
+    def get_new_session_id(self, user_id):
+        # 사용자의 마지막 session_id를 가져와 1을 더해 새로운 session_id 반환
+        self.connect()
+        sql = """
+        SELECT MAX(session_id) AS last_session
+        FROM chat_title
+        WHERE user_id = %s
+        """
+        try:
+            self.cursor.execute(sql, (user_id,))
+            result = self.cursor.fetchone()
+            last_session_id = result[0] if result[0] else 0
+            return last_session_id + 1
+        except pymysql.MySQLError as e:
+            print(f">>> MySQL Error: {e}")
+            return 9999
         finally:
             self.close()
