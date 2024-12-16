@@ -77,8 +77,12 @@ def user_login(db_user):
     btn = st.button("login")
     if username and email and btn:
         user_info = db_user.check_user(username, email)
-        st.session_state['user'] = {'user_id': user_info[0], 'user_name': user_info[1]}
-        st.rerun()
+        if user_info:
+            st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+            db_user.update_last_login(st.session_state['user']['id'])
+            st.rerun()
+        else:
+            st.markdown("<span style='color:red;'>username과 email을 다시 확인해주세요.</span>", unsafe_allow_html=True)
 
 @st.dialog("Join")
 def user_join(db_user):
@@ -90,7 +94,8 @@ def user_join(db_user):
     if username and email and btn:
         db_user.create_user(username, email)
         user_info = db_user.check_user(username, email)
-        st.session_state['user'] = {'user_id': user_info[0], 'user_name': user_info[1]}
+        st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+        db_user.update_last_login(st.session_state['user']['id'])
         st.rerun()
 
 def main():

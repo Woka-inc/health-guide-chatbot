@@ -42,10 +42,26 @@ class UserTableManager(BaseTableManager):
             self.cursor.execute(sql, values)
             results = self.cursor.fetchone()
         except pymysql.MySQLError as e:
-            print(">>> MySQL Error: {e}")
+            print(f">>> MySQL Error: {e}")
         finally:
             self.close()
             return results
+    
+    def update_last_login(self, user_id):
+        self.connect()
+
+        sql = """
+        UPDATE user
+        SET last_login = CURRENT_TIMESTAMP
+        WHERE user_id = %s
+        """
+        try:
+            self.cursor.execute(sql, user_id)
+            self.connection.commit()
+        except pymysql.MySQLError as e:
+            print(f">>> MySQL Error: {e}")
+        finally:
+            self.close()
     
     def create_user(self, username, email):
         self.connect()
@@ -59,6 +75,6 @@ class UserTableManager(BaseTableManager):
             self.cursor.execute(sql, values)
             self.connection.commit()
         except pymysql.MySQLError as e:
-            print(">>> MySQL Error: {e}")
+            print(f">>> MySQL Error: {e}")
         finally:
             self.close()
