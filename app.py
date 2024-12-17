@@ -18,6 +18,8 @@ import os
 # - rag_chain: set_chain에서 prompt template 정의 후 생성한 chain.
 # - query: 사용자의 질문을 저장하는 리스트
 # - generated: 사용자의 질문에 대해 생성된 모델의 응답을 저장하는 리스트
+# - user: ['id':, 'username':] 현재 로그인된 사용자의 계정정보
+# - session_id: 현재 사용자의 대화 session_id
 
 def crawl_and_save(crawler, save_path, force_crawl=False, **kwargs):
     """
@@ -258,6 +260,9 @@ def main():
     with st.sidebar:
         if st.button("로그아웃"):
             del st.session_state['user']
+            for chat_key in session_state_chat_keys:
+                st.session_state[chat_key] = []
+                st.session_state['session_id'] = None
 
         if st.button("대화 내용 저장하고 새로 시작하기"):
             archive_chat(db_chatlog)
