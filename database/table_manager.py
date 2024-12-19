@@ -74,8 +74,13 @@ class UserTableManager(BaseTableManager):
         try:
             self.cursor.execute(sql, values)
             self.connection.commit()
+            return None
         except pymysql.MySQLError as e:
             print(f">>> MySQL Error: {e}")
+            if isinstance(e, pymysql.err.IntegrityError):
+                return "Duplicate entry"
+            else:
+                return f"Unknown error {e}"
         finally:
             self.close()
 
@@ -126,6 +131,38 @@ class ChatLogTableManager(BaseTableManager):
             result = self.cursor.fetchone()
             last_session_id = result[0] if result[0] else 0
             return last_session_id + 1
+        except pymysql.MySQLError as e:
+            print(f">>> MySQL Error: {e}")
+            return 9999
+        finally:
+            self.close()
+    
+    def get_chat_titles(self, user_id):
+        self.connect()
+        sql = """
+        SELECT * FROM chat_title
+        WHERE user_id = %s
+        """
+        try:
+            self.cursor.execute(sql, (user_id,))
+            result = self.cursor.fetchall()
+            return result
+        except pymysql.MySQLError as e:
+            print(f">>> MySQL Error: {e}")
+            return 9999
+        finally:
+            self.close()
+    
+    def get_session_chat(self, user_id, session_id):
+        self.connect()
+        sql = """
+        SELECT * FROM chat_log
+        WHERE user_id = %s AND session_id = %s
+        """
+        try:
+            self.cursor.execute(sql, (user_id, session_id))
+            result = self.cursor.fetchall()
+            return result
         except pymysql.MySQLError as e:
             print(f">>> MySQL Error: {e}")
             return 9999
