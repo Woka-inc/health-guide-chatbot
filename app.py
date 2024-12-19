@@ -16,8 +16,7 @@ import os
 # - OPENAI_API_KEY: 모델에 사용할 OpenAI API Key. 환경변수로부터 로드하거나 사용자에게 입력 받음
 # - retriever: user_query를 입력받아 관련 문서를 검색. set_retriever에서 생성
 # - rag_chain: set_chain에서 prompt template 정의 후 생성한 chain.
-# - query: 사용자의 질문을 저장하는 리스트
-# - generated: 사용자의 질문에 대해 생성된 모델의 응답을 저장하는 리스트
+# - messages: {'role':, 'content':}로 구성된 리스트. 사용자 쿼리와 모델 응답을 담고 있음.
 # - user: ['id':, 'username':] 현재 로그인된 사용자의 계정정보
 # - session_id: 현재 사용자의 대화 session_id
 
@@ -95,31 +94,43 @@ def user_join(db_user, db_chatlog):
     email = st.text_input(label='email', placeholder="필수", label_visibility="collapsed")
     btn = st.button("join and login")
     if username and email and btn:
-        db_user.create_user(username, email)
-        user_info = db_user.check_user(username, email)
-        st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
-        st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
-        db_user.update_last_login(st.session_state['user']['id'])
-        st.rerun()
+        error = db_user.create_user(username, email)
+        if error:
+            if error == "Duplicate entry":
+                st.markdown("<span style='color:red;'>이미 존재하는 이메일입니다.</span>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<span style='color:red;'>{error}</span>", unsafe_allow_html=True)
+        else:
+            user_info = db_user.check_user(username, email)
+            st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+            db_user.update_last_login(st.session_state['user']['id'])
+            st.rerun()
 
 @st.dialog("대화 저장하기")
 def archive_chat(db_chatlog):
-    st.write("대화 내용을 저장할 제목을 입력해주세요.")
-    chat_title = st.text_input(label='chat title')
-    btn = st.button("저장하기")
-    session_id = st.session_state['session_id']
-    user_id = st.session_state['user']['id']
-    if chat_title and btn:
-        # 채팅목록 추가 in chat_title
-        db_chatlog.create_chat_title(session_id, user_id, chat_title)
-        # 채팅 내용 저장 in chat_log
-        for i in range(len(st.session_state['query'])):
-            db_chatlog.insert_chat_log(session_id, user_id, 'user', st.session_state['query'][i])
-            db_chatlog.insert_chat_log(session_id, user_id, 'bot', st.session_state['generated'][i])
-        # 현재 대화 초기화
-        st.session_state['query'] = []
-        st.session_state['generated'] = []
-        st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+    if len(st.session_state.messages) == 0:
+        st.write("저장할 대화가 없습니다.")
+        if st.button("확인"):
+            st.rerun()
+    else:
+        st.write("대화 내용을 저장할 제목을 입력해주세요.")
+        chat_title = st.text_input(label='chat title')
+        btn = st.button("저장하기")
+        session_id = st.session_state['session_id']
+        user_id = st.session_state['user']['id']
+        if chat_title and btn:
+            # 채팅목록 추가 in chat_title
+            db_chatlog.create_chat_title(session_id, user_id, chat_title)
+            # 채팅 내용 저장 in chat_log
+            for message in st.session_state.messages:
+                sendor = message['role']
+                content = message['content']
+                db_chatlog.insert_chat_log(session_id, user_id, sendor, content)
+            # 현재 대화 초기화
+            st.session_state.messages = []
+            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+            st.rerun()
 
 def main():
     def set_retriever():
@@ -227,16 +238,18 @@ def main():
         ]
         st.session_state['rag_chain'] = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
 
-    def generate_chat(user_query):
+    def get_response(user_query):
         """RAG 4~5: 검색 & 응답생성"""
         # RAG 4. Retrieval
         retrieved_documents = st.session_state['retriever'].search_docs(user_query)
         # RAG 5. Generate
         response = st.session_state['rag_chain'].get_response(message_inputs=[user_query, retrieved_documents], session_id=st.session_state['session_id'])
-        # session_state에 채팅 추가
-        st.session_state['query'].append(user_query)
-        st.session_state['generated'].append(response)
-
+        return response
+    
+    def write_app_title():
+        st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
+        st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
+    
     print(">>> main() 실행")
     openai_api_key = st.session_state['OPENAI_API_KEY']
 
@@ -251,27 +264,82 @@ def main():
     db_chatlog = ChatLogTableManager()
 
     # 채팅 session_state 초기화 ----------------------------------
-    session_state_chat_keys = ['query', 'generated']
-    for chat_key in session_state_chat_keys:
-        if chat_key not in st.session_state:
-            st.session_state[chat_key] = []
+    if 'messages' not in st.session_state:
+        st.session_state['messages'] = []
 
     # Streamlit UI - 사이드바 ----------------------------------
     with st.sidebar:
         if st.button("로그아웃"):
-            del st.session_state['user']
-            for chat_key in session_state_chat_keys:
-                st.session_state[chat_key] = []
-                st.session_state['session_id'] = None
+            if 'user' in st.session_state:
+                del st.session_state['user']
+            st.session_state.messages = []
+            st.session_state['session_id'] = None
+            st.rerun()
 
         if st.button("대화 내용 저장하고 새로 시작하기"):
             archive_chat(db_chatlog)
+        
+        if st.button("대화 새로 시작하기"):
+            st.session_state.messages = []
+            if 'show_chat_session' in st.session_state:
+                del st.session_state['show_chat_session']
+            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+        
+        if st.button("session_state 삭제"):
+            # 개발버전에서만 쓰는 버튼
+            st.session_state.clear()
+            st.rerun()
+        
+        if 'user' in st.session_state:
+            st.markdown("<h4>저장된 대화 내역</h4>", unsafe_allow_html=True)
+            titles = db_chatlog.get_chat_titles(st.session_state['user']['id'])
+            session_ids, chat_titles = [], []
+            for i in range(len(titles)):
+                session_ids.append(titles[i][0])
+                chat_titles.append(titles[i][2])
+                if st.button(chat_titles[i], use_container_width=True):
+                    st.session_state['show_chat_session'] = session_ids[i]
 
     # Streamlit UI - 메인 화면 ----------------------------------
-    st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
-    st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
-    if 'user' not in st.session_state:
+    if 'user' in st.session_state:
+        # 로그인 정보가 있을 때 채팅 화면
+        if 'show_chat_session' in st.session_state:
+            # 저장된 대화 내역을 클릭한 상태
+            selected_idx = session_ids.index(st.session_state['show_chat_session'])
+            selected_chat_title = chat_titles[selected_idx]
+            chat_log = db_chatlog.get_session_chat(st.session_state['user']['id'],
+                                                st.session_state['show_chat_session'])
+            st.markdown(f"<h4>{selected_chat_title}</h4>", unsafe_allow_html=True)
+            chat_container = st.container()
+            with chat_container:
+                for chat in chat_log:
+                    sender = chat[3]
+                    message = chat[4]
+                    st.chat_message(sender).write(message)
+        else: 
+            write_app_title()
+            # 채팅내역 표시
+            for message in st.session_state.messages:
+                with st.chat_message(message['role']):
+                    st.markdown(message['content'])
+            
+            # user input에 반응
+            if user_query := st.chat_input("궁금한 점을 입력하세요."):
+                with st.chat_message('user'):
+                    st.markdown(user_query)
+                # session_state.messages에 추가
+                st.session_state.messages.append({"role": "user", "content": user_query})
+
+                response = get_response(user_query)
+                with st.chat_message('ai'):
+                    st.markdown(response)
+                st.session_state.messages.append({"role": "ai", "content": response})
+            
+    else:
         # 로그인 정보가 없을 때 화면
+        if 'show_chat_session' in st.session_state:
+            del st.session_state['show_chat_session']
+        write_app_title()
         st.markdown("<p style='text-align: center;'>이용을 위해 로그인해주세요!</p>", unsafe_allow_html=True)
         btn_cols = st.columns(2)
         login_btn = btn_cols[0].button("Log in", type="primary", use_container_width=True)
@@ -280,18 +348,7 @@ def main():
             user_login(db_user, db_chatlog)
         if join_btn:
             user_join(db_user, db_chatlog)
-    else:
-        # 로그인 정보가 있을 때 채팅 화면
-        chat_container = st.container()
-        with chat_container:
-            st.chat_message("ai").write("특정 질환에 대해 궁금한 내용이 있거나, 현재 건강에 대해 걱정되는 점이 있다면 알려주세요! 😊")
-            if st.session_state['generated']:
-                for i in range(len(st.session_state['generated'])):
-                    st.chat_message("user").write(st.session_state['query'][i])
-                    st.chat_message("ai").write(st.session_state['generated'][i])
-        user_input = st.chat_input("궁금한 점을 입력하세요.")
-        if user_input:
-            generate_chat(user_input)
+    
 
 if __name__ == "__main__":
     # 프로그램 시작 시 .env 등을 통해 전달된 OPENAI_API_KEY가 st.session_state에 있는지 확인
