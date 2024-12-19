@@ -59,12 +59,12 @@ class RAGChain(BaseOpenAIChain):
                 message_query_dict[self.message_input_keys[idx]] = message_inputs[idx]
         else:
             raise ValueError("message에 포함된 input keys의 개수와 전달된 input query의 개수가 다릅니다.")
-
+        
         # self.chain에 MessageHistory 추가
         with_msg_history = RunnableWithMessageHistory(
             self.chain, # 실행할 runnable 객체(chain)
             self.get_session_history,   # chain에 덧붙일 history 가져오는 메서드
-            input_messages_key="user_question", # 최신 입력 메세지로 처리되는 키
+            input_messages_key="query", # 최신 입력 메세지로 처리되는 키
             history_messages_key="chat_history" # 이전 메세지를 추가할 키
         )
         config = {"configurable": {"session_id": session_id}}
@@ -73,6 +73,9 @@ class RAGChain(BaseOpenAIChain):
         response = with_msg_history.invoke(message_query_dict, config=config)
 
         return response.content
+
+    def reset_storage(self):
+        self.session_storage = {}
 
 class ImageDescriptionChain(BaseOpenAIChain):
     def __init__(self, system_prompt, api_key, model='gpt-4o'):

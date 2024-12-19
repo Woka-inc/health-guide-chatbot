@@ -129,6 +129,7 @@ def archive_chat(db_chatlog):
                 db_chatlog.insert_chat_log(session_id, user_id, sendor, content)
             # 현재 대화 초기화
             st.session_state.messages = []
+            st.session_state['rag_chain'].reset_storage()
             st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
             st.rerun()
 
@@ -225,7 +226,7 @@ def main():
 
 ---
 <<< 사용자 질문 >>>
-{user_question}
+{query}
 
 <<< 관련 근거자료 >>>
 {context}
@@ -235,9 +236,9 @@ def main():
 """
         prompt_message = [
             ("system", rag_prompt_template),
-            ('human', "{user_question}")
+            ('user', "{query}")
         ]
-        st.session_state['rag_chain'] = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
+        st.session_state['rag_chain'] = RAGChain(prompt_message, ['query', 'context'], openai_api_key)
 
     def get_chain_response(user_query):
         """RAG 4~5: 검색 & 응답생성"""
@@ -264,7 +265,7 @@ def main():
     db_user = UserTableManager()
     db_chatlog = ChatLogTableManager()
 
-    # 채팅 session_state 초기화 ----------------------------------
+    # 채팅 키 초기화 ----------------------------------
     if 'messages' not in st.session_state:
         st.session_state['messages'] = []
 
@@ -283,6 +284,7 @@ def main():
                     del st.session_state['user']
                 st.session_state.messages = []
                 st.session_state['session_id'] = None
+                st.session_state['rag_chain'].reset_storage()
                 st.rerun()
 
             if st.button("대화 내용 저장하고 새로 시작하기"):
@@ -293,7 +295,10 @@ def main():
                 if 'show_chat_session' in st.session_state:
                     del st.session_state['show_chat_session']
                 st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
-        
+                st.session_state['rag_chain'].reset_storage()
+                print(f">>> 현 session_id: {st.session_state.session_id}")
+
+            # 과거 대화 내역 표시
             st.markdown("<h4>저장된 대화 내역</h4>", unsafe_allow_html=True)
             titles = db_chatlog.get_chat_titles(st.session_state['user']['id'])
             session_ids, chat_titles = [], []
