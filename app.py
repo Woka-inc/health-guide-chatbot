@@ -234,7 +234,8 @@ def main():
 {chat_history}
 """
         prompt_message = [
-            ("system", rag_prompt_template)
+            ("system", rag_prompt_template),
+            ('human', "{user_question}")
         ]
         st.session_state['rag_chain'] = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
 
@@ -269,30 +270,30 @@ def main():
 
     # Streamlit UI - 사이드바 ----------------------------------
     with st.sidebar:
-        if 'user' in st.session_state:
-            st.write(f"user_id: {st.session_state.user['id']} / email: {st.session_state.user['email']}")
-        if st.button("로그아웃"):
-            if 'user' in st.session_state:
-                del st.session_state['user']
-            st.session_state.messages = []
-            st.session_state['session_id'] = None
-            st.rerun()
-
-        if st.button("대화 내용 저장하고 새로 시작하기"):
-            archive_chat(db_chatlog)
-        
-        if st.button("대화 새로 시작하기"):
-            st.session_state.messages = []
-            if 'show_chat_session' in st.session_state:
-                del st.session_state['show_chat_session']
-            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
-        
         if st.button("session_state 삭제"):
             # 개발버전에서만 쓰는 버튼
             st.session_state.clear()
             st.rerun()
-        
+
         if 'user' in st.session_state:
+            st.write(f"user_id: {st.session_state.user['id']} / email: {st.session_state.user['email']}")
+
+            if st.button("로그아웃"):
+                if 'user' in st.session_state:
+                    del st.session_state['user']
+                st.session_state.messages = []
+                st.session_state['session_id'] = None
+                st.rerun()
+
+            if st.button("대화 내용 저장하고 새로 시작하기"):
+                archive_chat(db_chatlog)
+            
+            if st.button("대화 새로 시작하기"):
+                st.session_state.messages = []
+                if 'show_chat_session' in st.session_state:
+                    del st.session_state['show_chat_session']
+                st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+        
             st.markdown("<h4>저장된 대화 내역</h4>", unsafe_allow_html=True)
             titles = db_chatlog.get_chat_titles(st.session_state['user']['id'])
             session_ids, chat_titles = [], []
@@ -319,6 +320,7 @@ def main():
                     message = chat[4]
                     st.chat_message(sender).write(message)
         else: 
+            # session_state에 'show_chat_session'키가 없는 상태 = 과거 대화 내용 조회가 아닌 상태
             write_app_title()
             # 채팅내역 표시
             for message in st.session_state.messages:
