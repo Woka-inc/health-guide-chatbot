@@ -79,7 +79,7 @@ def user_login(db_user, db_chatlog):
     if username and email and btn:
         user_info = db_user.check_user(username, email)
         if user_info:
-            st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+            st.session_state['user'] = {'id': user_info[0], 'email': user_info[2]}
             st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
@@ -102,7 +102,7 @@ def user_join(db_user, db_chatlog):
                 st.markdown(f"<span style='color:red;'>{error}</span>", unsafe_allow_html=True)
         else:
             user_info = db_user.check_user(username, email)
-            st.session_state['user'] = {'id': user_info[0], 'username': user_info[1]}
+            st.session_state['user'] = {'id': user_info[0], 'email': user_info[2]}
             st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
@@ -269,6 +269,8 @@ def main():
 
     # Streamlit UI - 사이드바 ----------------------------------
     with st.sidebar:
+        if 'user' in st.session_state:
+            st.write(f"user_id: {st.session_state.user['id']} / email: {st.session_state.user['email']}")
         if st.button("로그아웃"):
             if 'user' in st.session_state:
                 del st.session_state['user']
