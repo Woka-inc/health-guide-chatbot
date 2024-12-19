@@ -239,7 +239,7 @@ def main():
         ]
         st.session_state['rag_chain'] = RAGChain(prompt_message, ['user_question', 'context'], openai_api_key)
 
-    def get_response(user_query):
+    def get_chain_response(user_query):
         """RAG 4~5: 검색 & 응답생성"""
         # RAG 4. Retrieval
         retrieved_documents = st.session_state['retriever'].search_docs(user_query)
@@ -334,7 +334,7 @@ def main():
                 # session_state.messages에 추가
                 st.session_state.messages.append({"role": "user", "content": user_query})
 
-                response = get_response(user_query)
+                response = get_chain_response(user_query)
                 with st.chat_message('ai'):
                     st.markdown(response)
                 st.session_state.messages.append({"role": "ai", "content": response})
