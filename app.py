@@ -253,6 +253,8 @@ def main():
         st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
         st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
     
+    st.set_page_config(page_title="Health Guide ChatBot | Woka")
+
     print(">>> main() 실행")
     openai_api_key = st.session_state['OPENAI_API_KEY']
 
