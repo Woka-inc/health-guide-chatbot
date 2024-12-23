@@ -133,73 +133,72 @@ def archive_chat(db_chatlog):
             st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
             st.rerun()
 
-def main():
-    @st.cache_resource
-    def set_retriever():
-        """RAG 0~3: 문서로드~검색기 생성"""
-        # RAG 0. Crawl Data
-        crawl_tasks = [
-            {
-                "crawler": AMCMealTherapyCrawler,
-                "save_path": './res/amc-mealtherapy.json',
-                "kwargs": {}
-            },
-            {
-                "crawler": SSHDiabetesCrawler,
-                "save_path": './res/ssh-diabetes.json',
-                "kwargs": {"api_key": openai_api_key}
-            }
-        ]
-        crawl_and_update(crawl_tasks, force_crawl=False) 
-        
-        # RAG 1. Load Data
-        json_doc_paths = [crawler['save_path'] for crawler in crawl_tasks]
-        json_loader = JsonLoader()
-        documents = []
-        for path in json_doc_paths:
-            json_doc = json_loader.load(path)
-            documents += json_to_langchain_doclist(json_doc)
-        
-        # RAG 2. Split Documents
-        splitted_documents = split_documents(documents, 
-                                        chunk_size=300, 
-                                        overlap=100)
-        
-        # RAG 3. Indexing: Embed documents, set retriever
-        return create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 2})
+@st.cache_resource
+def set_retriever():
+    """RAG 0~3: 문서로드~검색기 생성"""
+    # RAG 0. Crawl Data
+    crawl_tasks = [
+        {
+            "crawler": AMCMealTherapyCrawler,
+            "save_path": './res/amc-mealtherapy.json',
+            "kwargs": {}
+        },
+        {
+            "crawler": SSHDiabetesCrawler,
+            "save_path": './res/ssh-diabetes.json',
+            "kwargs": {"api_key": st.session_state['OPENAI_API_KEY']}
+        }
+    ]
+    crawl_and_update(crawl_tasks, force_crawl=False) 
     
-    def set_chain():
-        """RAG 3.5: chain 생성"""
-        print(">>> RAGChain 생성 in st.session_state")
-        # RAG 3.5. setup chain
-        rag_prompt_template = """당신은 사용자의 건강 상태와 상황을 이해하고, 공신력 있는 근거 자료를 바탕으로 깊이 있고 실질적인 건강 정보를 제공하는 전문가 AI 챗봇입니다. 
+    # RAG 1. Load Data
+    json_doc_paths = [crawler['save_path'] for crawler in crawl_tasks]
+    json_loader = JsonLoader()
+    documents = []
+    for path in json_doc_paths:
+        json_doc = json_loader.load(path)
+        documents += json_to_langchain_doclist(json_doc)
+    
+    # RAG 2. Split Documents
+    splitted_documents = split_documents(documents, 
+                                    chunk_size=300, 
+                                    overlap=100)
+    
+    # RAG 3. Indexing: Embed documents, set retriever
+    return create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": st.session_state['OPENAI_API_KEY'], "top_k": 2})
+    
+def set_chain():
+    """RAG 3.5: chain 생성"""
+    print(">>> RAGChain 생성 in st.session_state")
+    # RAG 3.5. setup chain
+    rag_prompt_template = """당신은 사용자의 건강 상태와 상황을 이해하고, 공신력 있는 근거 자료를 바탕으로 깊이 있고 실질적인 건강 정보를 제공하는 전문가 AI 챗봇입니다. 
 사용자의 질문에 대해 다음 기준을 따라 답변하세요:
 
 1. **근거 자료 기반 응답**:  
-   제공되는 답변의 정보는 반드시 아래의 <<< 관련 근거자료 >>>에 근거해야 합니다.
-   아래의 <<< 관련 근거자료>>>로 제공된 정보를 벗어나 추측하지 말고, 모든 답변에는 실제 출처를 source_url과 함께 명확히 언급하세요.  
-   - '출처: 서울아산병원'
+제공되는 답변의 정보는 반드시 아래의 <<< 관련 근거자료 >>>에 근거해야 합니다.
+아래의 <<< 관련 근거자료>>>로 제공된 정보를 벗어나 추측하지 말고, 모든 답변에는 실제 출처를 source_url과 함께 명확히 언급하세요.  
+- '출처: 서울아산병원'
 
 2. **맞춤형 초기 대화**:  
-   사용자 상황을 이해하기 위해 답변을 완료한 뒤에도 친근하고 구체적인 질문을 던지세요. 예시:  
-   - '현재 가장 걱정되는 건강 문제는 무엇인가요?'  
-   - '어떤 목표를 가지고 계신가요? 혈당 조절, 체중 관리, 아니면 전반적인 건강 개선인가요?'
+사용자 상황을 이해하기 위해 답변을 완료한 뒤에도 친근하고 구체적인 질문을 던지세요. 예시:  
+- '현재 가장 걱정되는 건강 문제는 무엇인가요?'  
+- '어떤 목표를 가지고 계신가요? 혈당 조절, 체중 관리, 아니면 전반적인 건강 개선인가요?'
 
 3. **개인화된 결과 제공**:  
-   사용자의 정보(나이, 성별, 특정 질환)를 바탕으로 맞춤형 솔루션을 제안합니다. 예시:  
-   - '○○님(20대 여성)을 위한 맞춤형 혈당 관리 팁입니다.'  
-   - '2형 당뇨 환자에게 적합한 하루 식사 및 운동 가이드를 제공할게요.'
+사용자의 정보(나이, 성별, 특정 질환)를 바탕으로 맞춤형 솔루션을 제안합니다. 예시:  
+- '○○님(20대 여성)을 위한 맞춤형 혈당 관리 팁입니다.'  
+- '2형 당뇨 환자에게 적합한 하루 식사 및 운동 가이드를 제공할게요.'
 
 4. **실질적인 실행 방안 제공**:  
-   관련 근거자료에 실질적인 실행 방안에 대한 정보가 있다면 정보를 **즉시 실행 가능한 형태**로 제시하고, 행동 지침 또는 체크리스트를 포함하세요. 예시:  
-   - '추천 아침 식단: 귀리죽과 삶은 계란'  
-   - '실행 체크리스트:  
-     - [ ] 하루 세 끼 규칙적으로 식사하기  
-     - [ ] 30분 이상 걷기 운동하기  
-     - [ ] 고섬유질 식품 섭취하기'
+관련 근거자료에 실질적인 실행 방안에 대한 정보가 있다면 정보를 **즉시 실행 가능한 형태**로 제시하고, 행동 지침 또는 체크리스트를 포함하세요. 예시:  
+- '추천 아침 식단: 귀리죽과 삶은 계란'  
+- '실행 체크리스트:  
+    - [ ] 하루 세 끼 규칙적으로 식사하기  
+    - [ ] 30분 이상 걷기 운동하기  
+    - [ ] 고섬유질 식품 섭취하기'
 
 5. **전문적이고 공감하는 어조**:  
-   전문적이지만 친절하고 따뜻한 어조로 사용자에게 공감하며 안내하세요.
+전문적이지만 친절하고 따뜻한 어조로 사용자에게 공감하며 안내하세요.
 ---
 <<< 입력 예시 >>>
 '나는 23살 여성이야. 며칠 전 제2형 당뇨병을 진단받았어. 혈당 수치를 정상으로 유지하는 식사 방법을 알려줘.'
@@ -209,20 +208,20 @@ def main():
 하지만 작은 습관부터 차근차근 실천하면 충분히 관리할 수 있으니 너무 부담 갖지 않으셔도 돼요. 제가 도움을 드릴 수 있도록 정확하고 실질적인 정보를 알려드릴게요! 
 
 1. **식사 조절의 필요성**:  
-   당뇨병은 인슐린의 절대적 또는 상대적인 부족으로 인해 고혈당 및 대사 장애를 초래하는 질환입니다. 따라서, 혈당을 정상에 가깝게 유지하고 합병증을 최소화하기 위해 식사 조절이 필요합니다.  
-   - 출처: 서울아산병원 (link)
+당뇨병은 인슐린의 절대적 또는 상대적인 부족으로 인해 고혈당 및 대사 장애를 초래하는 질환입니다. 따라서, 혈당을 정상에 가깝게 유지하고 합병증을 최소화하기 위해 식사 조절이 필요합니다.  
+- 출처: 서울아산병원 (link)
 
 2. **추천 식단 및 조리 방법**:
-   - **간식**: 정규 식사 사이에 제철 과일과 저지방 우유를 섭취하는 것이 좋습니다.
-   - **조리 방법**: 지방 섭취를 줄이기 위해 튀기거나 부치기 대신 굽기, 찜, 삶는 방법을 주로 선택하세요. 맛을 내기 위해 적당량의 식물성 기름(참기름, 들기름 등)은 사용해도 좋습니다.
-   - 출처: 서울아산병원 (link)
+- **간식**: 정규 식사 사이에 제철 과일과 저지방 우유를 섭취하는 것이 좋습니다.
+- **조리 방법**: 지방 섭취를 줄이기 위해 튀기거나 부치기 대신 굽기, 찜, 삶는 방법을 주로 선택하세요. 맛을 내기 위해 적당량의 식물성 기름(참기름, 들기름 등)은 사용해도 좋습니다.
+- 출처: 서울아산병원 (link)
 
 3. **실행 체크리스트**:
-   - [ ] 하루 세 끼 규칙적으로 식사하기
-   - [ ] 고섬유질 식품 섭취하기
-   - [ ] 과도한 설탕과 단순 탄수화물 섭취 줄이기
-   - [ ] 매일 꾸준한 운동(30분 이상 걷기) 하기
-   - 출처: 삼성서울병원 당뇨 월간지 (link)
+- [ ] 하루 세 끼 규칙적으로 식사하기
+- [ ] 고섬유질 식품 섭취하기
+- [ ] 과도한 설탕과 단순 탄수화물 섭취 줄이기
+- [ ] 매일 꾸준한 운동(30분 이상 걷기) 하기
+- 출처: 삼성서울병원 당뇨 월간지 (link)
 
 개인의 건강 상태에 따라 다르게 적용될 수 있으니, 담당 의사나 영양사와 상의하는 것도 좋은 방법입니다. 건강 관리에 도움이 되시길 바랍니다!'
 ---
@@ -235,28 +234,27 @@ def main():
 <<< 관련 근거자료 >>>
 {context}
 """
-        prompt_message = [
-            ("system", rag_prompt_template),
-            ("human", "<<< 사용자 입력 >>>\n{query}")
-        ]
-        st.session_state['rag_chain'] = RAGChain(prompt_message, openai_api_key)
+    prompt_message = [
+        ("system", rag_prompt_template),
+        ("human", "<<< 사용자 입력 >>>\n{query}")
+    ]
+    st.session_state['rag_chain'] = RAGChain(prompt_message, st.session_state['OPENAI_API_KEY'])
 
-    def get_chain_response(user_query):
-        """RAG 4~5: 검색 & 응답생성"""
-        # RAG 4. Retrieval
-        retrieved_documents = st.session_state['retriever'].search_docs(user_query)
-        # RAG 5. Generate
-        response = st.session_state['rag_chain'].get_response(message_inputs={'query': user_query, 'context': retrieved_documents}, session_id=st.session_state['session_id'])
-        return response
+def get_chain_response(user_query):
+    """RAG 4~5: 검색 & 응답생성"""
+    # RAG 4. Retrieval
+    retrieved_documents = st.session_state['retriever'].search_docs(user_query)
+    # RAG 5. Generate
+    response = st.session_state['rag_chain'].get_response(message_inputs={'query': user_query, 'context': retrieved_documents}, session_id=st.session_state['session_id'])
+    return response
     
+
+def app():
     def write_app_title():
         st.markdown("<h1 style='text-align: center;'>Health Guide ChatBot</h1>", unsafe_allow_html=True)
         st.markdown("<h5 style='text-align: center;'>당신의 건강을 위한 신뢰할 수 있는 맞춤형 정보를 제공해드립니다.</h5>", unsafe_allow_html=True)
     
-    st.set_page_config(page_title="Health Guide ChatBot | Woka")
-
     print(">>> main() 실행")
-    openai_api_key = st.session_state['OPENAI_API_KEY']
 
     # retriever, chain 초기화 ----------------------------------
     if 'retriever' not in st.session_state:
@@ -274,11 +272,6 @@ def main():
 
     # Streamlit UI - 사이드바 ----------------------------------
     with st.sidebar:
-        if st.button("session_state 삭제"):
-            # 개발버전에서만 쓰는 버튼
-            st.session_state.clear()
-            st.rerun()
-
         if 'user' in st.session_state:
             st.write(f"user_id: {st.session_state.user['id']} / email: {st.session_state.user['email']}")
 
@@ -361,6 +354,26 @@ def main():
         if join_btn:
             user_join(db_user, db_chatlog)
     
+def main():
+    st.set_page_config(page_title="Health Guide ChatBot | Woka")
+
+    if st.session_state.get('user', {}).get('email') == 'woka@admin':
+        """admin 버전"""
+        if st.sidebar.button("session_state 삭제"):
+            # 개발버전에서만 쓰는 버튼
+            st.session_state.clear()
+            st.rerun()
+
+        page_names_to_funcs = {
+            "chatbot": app,
+            "evaluation": eval
+        }
+
+        selection = st.sidebar.selectbox("Choose a page", page_names_to_funcs.keys())
+        page_names_to_funcs[selection]()
+    else:
+        """일반 유저 버전"""
+        app()
 
 if __name__ == "__main__":
     # 프로그램 시작 시 .env 등을 통해 전달된 OPENAI_API_KEY가 st.session_state에 있는지 확인
