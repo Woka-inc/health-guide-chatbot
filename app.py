@@ -80,7 +80,7 @@ def user_login(db_user, db_chatlog):
         user_info = db_user.check_user(username, email)
         if user_info:
             st.session_state['user'] = {'id': user_info[0], 'email': user_info[2]}
-            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+            st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
         else:
@@ -103,7 +103,7 @@ def user_join(db_user, db_chatlog):
         else:
             user_info = db_user.check_user(username, email)
             st.session_state['user'] = {'id': user_info[0], 'email': user_info[2]}
-            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+            st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
 
@@ -130,10 +130,11 @@ def archive_chat(db_chatlog):
             # 현재 대화 초기화
             st.session_state.messages = []
             st.session_state['rag_chain'].reset_storage()
-            st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+            st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
             st.rerun()
 
 def main():
+    @st.cache_resource
     def set_retriever():
         """RAG 0~3: 문서로드~검색기 생성"""
         # RAG 0. Crawl Data
@@ -165,10 +166,11 @@ def main():
                                         overlap=100)
         
         # RAG 3. Indexing: Embed documents, set retriever
-        st.session_state['retriever'] = create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 2})
+        return create_retriever(FAISSBM25Retriever, splitted_documents, **{"openai_api_key": openai_api_key, "top_k": 2})
     
     def set_chain():
         """RAG 3.5: chain 생성"""
+        print(">>> RAGChain 생성 in st.session_state")
         # RAG 3.5. setup chain
         rag_prompt_template = """당신은 사용자의 건강 상태와 상황을 이해하고, 공신력 있는 근거 자료를 바탕으로 깊이 있고 실질적인 건강 정보를 제공하는 전문가 AI 챗봇입니다. 
 사용자의 질문에 대해 다음 기준을 따라 답변하세요:
@@ -223,29 +225,28 @@ def main():
    - 출처: 삼성서울병원 당뇨 월간지 (link)
 
 개인의 건강 상태에 따라 다르게 적용될 수 있으니, 담당 의사나 영양사와 상의하는 것도 좋은 방법입니다. 건강 관리에 도움이 되시길 바랍니다!'
-
 ---
-<<< 사용자 질문 >>>
+<<< 과거 사용자 채팅 내용 >>>
+{chat_history}
+
+<<< 사용자 입력 >>>
 {query}
 
 <<< 관련 근거자료 >>>
 {context}
-
-<<< 이전 사용자와 챗봇의 대화 내용 >>>
-{chat_history}
 """
         prompt_message = [
             ("system", rag_prompt_template),
-            ('user', "{query}")
+            ("human", "<<< 사용자 입력 >>>\n{query}")
         ]
-        st.session_state['rag_chain'] = RAGChain(prompt_message, ['query', 'context'], openai_api_key)
+        st.session_state['rag_chain'] = RAGChain(prompt_message, openai_api_key)
 
     def get_chain_response(user_query):
         """RAG 4~5: 검색 & 응답생성"""
         # RAG 4. Retrieval
         retrieved_documents = st.session_state['retriever'].search_docs(user_query)
         # RAG 5. Generate
-        response = st.session_state['rag_chain'].get_response(message_inputs=[user_query, retrieved_documents], session_id=st.session_state['session_id'])
+        response = st.session_state['rag_chain'].get_response(message_inputs={'query': user_query, 'context': retrieved_documents}, session_id=st.session_state['session_id'])
         return response
     
     def write_app_title():
@@ -257,8 +258,8 @@ def main():
 
     # retriever, chain 초기화 ----------------------------------
     if 'retriever' not in st.session_state:
-        set_retriever()
-    if 'chain' not in st.session_state:
+        st.session_state['retriever'] = set_retriever()
+    if 'rag_chain' not in st.session_state:
         set_chain()
     
     # database table manager 초기화
@@ -294,7 +295,7 @@ def main():
                 st.session_state.messages = []
                 if 'show_chat_session' in st.session_state:
                     del st.session_state['show_chat_session']
-                st.session_state['session_id'] = db_chatlog.get_new_session_id(st.session_state['user']['id'])
+                st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
                 st.session_state['rag_chain'].reset_storage()
                 print(f">>> 현 session_id: {st.session_state.session_id}")
 
