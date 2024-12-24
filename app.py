@@ -353,12 +353,15 @@ def app():
             user_login(db_user, db_chatlog)
         if join_btn:
             user_join(db_user, db_chatlog)
+
+def eval():
+    st.write("HEY")
     
 def main():
     st.set_page_config(page_title="Health Guide ChatBot | Woka")
 
     if st.session_state.get('user', {}).get('email') == 'woka@admin':
-        """admin 버전"""
+        # admin 버전
         if st.sidebar.button("session_state 삭제"):
             # 개발버전에서만 쓰는 버튼
             st.session_state.clear()
@@ -372,7 +375,7 @@ def main():
         selection = st.sidebar.selectbox("Choose a page", page_names_to_funcs.keys())
         page_names_to_funcs[selection]()
     else:
-        """일반 유저 버전"""
+        # 일반 유저 버전
         app()
 
 if __name__ == "__main__":
