@@ -8,11 +8,11 @@ from database.table_manager import UserTableManager, ChatLogTableManager
 from model.eval import LLMJudge
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langsmith import Client
 
 import streamlit as st
 from dotenv import load_dotenv
 import os
-from datetime import datetime
 
 # st.session_state 목록
 # - OPENAI_API_KEY: 모델에 사용할 OpenAI API Key. 환경변수로부터 로드하거나 사용자에게 입력 받음
@@ -238,7 +238,9 @@ def get_chain_response(user_query):
     # RAG 5. Generate
     response = st.session_state['rag_chain'].get_response(message_inputs={'query': user_query, 'context': retrieved_documents}, session_id=st.session_state['session_id'])
     return response
-    
+
+def get_metric_ratio(metric, df):
+    return df[metric].sum() / len(df) * 100
 
 def app():
     def write_app_title():
@@ -346,30 +348,80 @@ def app():
             user_join(db_user, db_chatlog)
 
 def eval():
-    st.write("retriever in st.session_state:", 'retriever' in st.session_state)
-    st.write("rag_chain in st.session_state", 'rag_chain' in st.session_state)
-    # 로그인 화면에서 app()이 먼저 실행되기 때문에 실제 app에서 쓰는 chain, retriever는 st.session_state에 있는 상황
+    # 평가할 대상 준비 (streamlit 쓰지 않아야 함)
     retriever = set_retriever()
     rag_chain = set_chain()
-
     def target(inputs: dict) -> dict:
         # 평가할 응답 생성
         retrieved_documents = retriever.search_docs(inputs['text'])
         # RAG 5. Generate
         response = rag_chain.get_response(message_inputs={'query': inputs['text'], 'context': retrieved_documents})
-        return {'response': response}
+        return {'response': response, 'documents': retrieved_documents}
     
-    if st.button("run evaluation"):
-        st.write("LLMJudge 생성")
-        judge = LLMJudge(st.session_state['OPENAI_API_KEY'])
-        st.write("평가시작")
-        current_time = datetime.now().strftime("%Y/%m/%d %I:%M:%S %p")
-        print(f"--------------------------- {current_time} ---------------------------")
-        result = judge.evaluate(target, "Meal QA set", ['accuracy'], "test eval")
-        st.write(result)
-        st.write("실행완료")
+    client = Client()
+    # 데이터셋 불러오기
+    dataset_generator = client.list_datasets()
+    datasets = [dataset.name for dataset in dataset_generator]
+    # 평가 메트릭
+    metrics = ['correctness', 'relevance', 'groundedness', 'retrieval_relevance']
+    metric_instructions = """<b>🍊 Correctness</b><br/>모델의 응답이 정답과 유사한가<br/>
+    <b>🍊 Relevance</b><br/>모델의 응답이 질문과 관련있는가<br/>
+    <b>🍊 Groundedness</b><br/>모델의 응답이 검색 문서에 기반했는가<br/>
+    <b>🍊 Retrieval Relevance</b><br/>검색 문서가 질문과 관련있는가<br/>
+    """
+    st.sidebar.markdown(metric_instructions, unsafe_allow_html=True)
 
-    
+    eval_result, selected_i = None, None
+    eval_status = st.status("세부 설정 후 run evaluation을 클릭하세요.", state='complete')
+
+    # 평가 전 세부 선택
+    with st.container(border=True):
+        selected_database = st.selectbox("사용할 dataset을 선택하세요", datasets)
+        selected_metrics = st.multiselect("사용할 평가 metric을 선택하세요.", metrics)
+        if st.button("run evaluation"):
+            eval_status.update(label="평가 진행 중", state='running')
+            judge = LLMJudge(st.session_state['OPENAI_API_KEY'])
+            st.session_state['eval_result'] = judge.evaluate(target, 
+                                    selected_database, 
+                                    ['correctness', 'relevance', 'groundedness', 'retrieval_relevance'], 
+                                    prefix="RAG evaluation test",
+                                    metadata={"version": "initial RAG Chain"})
+            eval_status.update(label="평가 완료!", state='complete')
+
+    eval_result = st.session_state['eval_result']
+    # 평가 완료되면 결과 표시
+    if eval_result:
+        df = eval_result.to_pandas()
+        columns = st.columns(len(selected_metrics))
+        for i in range(len(selected_metrics)):
+            columns[i].metric(selected_metrics[i], get_metric_ratio('feedback.' + selected_metrics[i], df))
+
+        st.divider()
+        questions = df.loc[:, 'inputs.text'].to_list()
+        selected_question = st.selectbox("세부 결과를 확인할 질문을 선택하세요.", questions)
+        selected_i = questions.index(selected_question)
+        st.text("")
+    if selected_i:
+        columns = st.columns(len(selected_metrics))
+        for i in range(len(selected_metrics)):
+            value = df.loc[selected_i, 'feedback.' + selected_metrics[i]]
+            columns[i].metric(selected_metrics[i], value)
+        st.text("")
+        question = df.loc[selected_i, 'inputs.text']
+        response = df.loc[selected_i, 'outputs.response']
+        documents = df.loc[selected_i, 'outputs.documents']
+        truth = df.loc[selected_i, 'reference.label']
+        st.subheader(question)
+        st.markdown("<h4>🍊 truth</h4>", unsafe_allow_html=True)
+        st.markdown(truth, unsafe_allow_html=True)
+        st.markdown("<h4>🍊 response</h4>", unsafe_allow_html=True)
+        st.markdown(response, unsafe_allow_html=True)
+        st.markdown("<h4>🍊 retrieved documents</h4>", unsafe_allow_html=True)
+        for document in documents:
+            st.json(document.metadata)
+            st.text(document.page_content)
+
+
 def main():
     st.set_page_config(page_title="Health Guide ChatBot | Woka")
 
