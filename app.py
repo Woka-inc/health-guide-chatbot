@@ -5,12 +5,14 @@ from model.retriever import FAISSBM25Retriever
 from model.openai_langchain import RAGChain
 from preprocessor.structured_data import json_to_langchain_doclist
 from database.table_manager import UserTableManager, ChatLogTableManager
+from model.eval import LLMJudge
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 import streamlit as st
 from dotenv import load_dotenv
 import os
+from datetime import datetime
 
 # st.session_state 목록
 # - OPENAI_API_KEY: 모델에 사용할 OpenAI API Key. 환경변수로부터 로드하거나 사용자에게 입력 받음
@@ -189,16 +191,11 @@ def set_chain():
 - '○○님(20대 여성)을 위한 맞춤형 혈당 관리 팁입니다.'  
 - '2형 당뇨 환자에게 적합한 하루 식사 및 운동 가이드를 제공할게요.'
 
-4. **실질적인 실행 방안 제공**:  
-관련 근거자료에 실질적인 실행 방안에 대한 정보가 있다면 정보를 **즉시 실행 가능한 형태**로 제시하고, 행동 지침 또는 체크리스트를 포함하세요. 예시:  
-- '추천 아침 식단: 귀리죽과 삶은 계란'  
-- '실행 체크리스트:  
-    - [ ] 하루 세 끼 규칙적으로 식사하기  
-    - [ ] 30분 이상 걷기 운동하기  
-    - [ ] 고섬유질 식품 섭취하기'
-
-5. **전문적이고 공감하는 어조**:  
+4. **전문적이고 공감하는 어조**:  
 전문적이지만 친절하고 따뜻한 어조로 사용자에게 공감하며 안내하세요.
+
+5. **구조화된 정보 제공(선택적)**:
+사용자에게 제공하는 정보가 많다면, 아래 답변 예시를 참고해 구조화된 내용으로 전달하세요.
 ---
 <<< 입력 예시 >>>
 '나는 23살 여성이야. 며칠 전 제2형 당뇨병을 진단받았어. 혈당 수치를 정상으로 유지하는 식사 방법을 알려줘.'
@@ -216,13 +213,6 @@ def set_chain():
 - **조리 방법**: 지방 섭취를 줄이기 위해 튀기거나 부치기 대신 굽기, 찜, 삶는 방법을 주로 선택하세요. 맛을 내기 위해 적당량의 식물성 기름(참기름, 들기름 등)은 사용해도 좋습니다.
 - 출처: 서울아산병원 (link)
 
-3. **실행 체크리스트**:
-- [ ] 하루 세 끼 규칙적으로 식사하기
-- [ ] 고섬유질 식품 섭취하기
-- [ ] 과도한 설탕과 단순 탄수화물 섭취 줄이기
-- [ ] 매일 꾸준한 운동(30분 이상 걷기) 하기
-- 출처: 삼성서울병원 당뇨 월간지 (link)
-
 개인의 건강 상태에 따라 다르게 적용될 수 있으니, 담당 의사나 영양사와 상의하는 것도 좋은 방법입니다. 건강 관리에 도움이 되시길 바랍니다!'
 ---
 <<< 과거 사용자 채팅 내용 >>>
@@ -238,7 +228,8 @@ def set_chain():
         ("system", rag_prompt_template),
         ("human", "<<< 사용자 입력 >>>\n{query}")
     ]
-    st.session_state['rag_chain'] = RAGChain(prompt_message, st.session_state['OPENAI_API_KEY'])
+    chain = RAGChain(prompt_message, st.session_state['OPENAI_API_KEY'])
+    return chain
 
 def get_chain_response(user_query):
     """RAG 4~5: 검색 & 응답생성"""
@@ -260,7 +251,7 @@ def app():
     if 'retriever' not in st.session_state:
         st.session_state['retriever'] = set_retriever()
     if 'rag_chain' not in st.session_state:
-        set_chain()
+        st.session_state['rag_chain'] = set_chain()
     
     # database table manager 초기화
     db_user = UserTableManager()
@@ -355,7 +346,29 @@ def app():
             user_join(db_user, db_chatlog)
 
 def eval():
-    st.write("HEY")
+    st.write("retriever in st.session_state:", 'retriever' in st.session_state)
+    st.write("rag_chain in st.session_state", 'rag_chain' in st.session_state)
+    # 로그인 화면에서 app()이 먼저 실행되기 때문에 실제 app에서 쓰는 chain, retriever는 st.session_state에 있는 상황
+    retriever = set_retriever()
+    rag_chain = set_chain()
+
+    def target(inputs: dict) -> dict:
+        # 평가할 응답 생성
+        retrieved_documents = retriever.search_docs(inputs['text'])
+        # RAG 5. Generate
+        response = rag_chain.get_response(message_inputs={'query': inputs['text'], 'context': retrieved_documents})
+        return {'response': response}
+    
+    if st.button("run evaluation"):
+        st.write("LLMJudge 생성")
+        judge = LLMJudge(st.session_state['OPENAI_API_KEY'])
+        st.write("평가시작")
+        current_time = datetime.now().strftime("%Y/%m/%d %I:%M:%S %p")
+        print(f"--------------------------- {current_time} ---------------------------")
+        result = judge.evaluate(target, "Meal QA set", ['accuracy'], "test eval")
+        st.write(result)
+        st.write("실행완료")
+
     
 def main():
     st.set_page_config(page_title="Health Guide ChatBot | Woka")
