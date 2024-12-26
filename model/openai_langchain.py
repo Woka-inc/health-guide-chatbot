@@ -42,18 +42,24 @@ class RAGChain(BaseOpenAIChain):
         self.session_storage[session_id] = InMemoryChatMessageHistory(messages=messages)
         return self.session_storage[session_id]
 
-    def get_response(self, message_inputs, session_id):
-        with_msg_history = RunnableWithMessageHistory(
-            self.chain,  # 실행할 runnable 객체
-            self.get_session_history,
-            input_messages_key="query",  # 최신 입력 메세지로 처리되는 키
-            history_messages_key="chat_history" # 이전 메세지를 추가할 키
-        )
-        response = with_msg_history.invoke(
-            message_inputs,
-            config={"configurable": {"session_id": session_id}}
-        )
-        return response.content
+    def get_response(self, message_inputs, session_id=None):
+        # session_id를 지정하지 않으면 memory 없이 구현 (평가용))
+        if session_id:
+            with_msg_history = RunnableWithMessageHistory(
+                self.chain,  # 실행할 runnable 객체
+                self.get_session_history,
+                input_messages_key="query",  # 최신 입력 메세지로 처리되는 키
+                history_messages_key="chat_history" # 이전 메세지를 추가할 키
+            )
+            response = with_msg_history.invoke(
+                message_inputs,
+                config={"configurable": {"session_id": session_id}}
+            )
+            return response.content
+        else:
+            message_inputs['chat_history'] = None
+            response = self.chain.invoke(message_inputs)
+            return response.content
 
     def reset_storage(self):
         self.session_storage = {}
