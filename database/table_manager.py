@@ -19,7 +19,7 @@ class BaseTableManager:
             )
             self.cursor = self.connection.cursor()
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
+            raise e
     
     def close(self):
         if self.connection:
@@ -42,7 +42,7 @@ class UserTableManager(BaseTableManager):
             self.cursor.execute(sql, values)
             results = self.cursor.fetchone()
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
+            raise e
         finally:
             self.close()
             return results
@@ -59,7 +59,7 @@ class UserTableManager(BaseTableManager):
             self.cursor.execute(sql, user_id)
             self.connection.commit()
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
+            raise e
         finally:
             self.close()
     
@@ -76,11 +76,10 @@ class UserTableManager(BaseTableManager):
             self.connection.commit()
             return None
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
             if isinstance(e, pymysql.err.IntegrityError):
                 return "Duplicate entry"
             else:
-                return f"Unknown error {e}"
+                raise e
         finally:
             self.close()
 
@@ -99,7 +98,7 @@ class ChatLogTableManager(BaseTableManager):
             self.cursor.execute(sql, values)
             self.connection.commit()
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
+            raise e
         finally:
             self.close()
     
@@ -114,7 +113,7 @@ class ChatLogTableManager(BaseTableManager):
             self.cursor.execute(sql, values)
             self.connection.commit()
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
+            raise e
         finally:
             self.close()
 
@@ -132,8 +131,7 @@ class ChatLogTableManager(BaseTableManager):
             last_session_id = result[0] if result[0] else 0
             return last_session_id + 1
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
-            return 9999
+            raise e
         finally:
             self.close()
     
@@ -148,8 +146,7 @@ class ChatLogTableManager(BaseTableManager):
             result = self.cursor.fetchall()
             return result
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
-            return 9999
+            raise e
         finally:
             self.close()
     
@@ -164,7 +161,6 @@ class ChatLogTableManager(BaseTableManager):
             result = self.cursor.fetchall()
             return result
         except pymysql.MySQLError as e:
-            print(f">>> MySQL Error: {e}")
-            return 9999
+            raise e
         finally:
             self.close()
