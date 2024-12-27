@@ -348,6 +348,9 @@ def app():
             user_join(db_user, db_chatlog)
 
 def eval():
+    if 'eval_result' not in st.session_state:
+        st.session_state['eval_result'] = None
+        
     # 평가할 대상 준비 (streamlit 쓰지 않아야 함)
     retriever = set_retriever()
     rag_chain = set_chain()
