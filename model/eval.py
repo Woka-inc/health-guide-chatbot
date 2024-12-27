@@ -137,14 +137,14 @@ QUESTION: {inputs['text']}"""
             ])
         return grade["relevant"]
     
-    def evaluate(self, target, dataset_name, evaluator_keywords:list, prefix, metadata=None):
+    def evaluate(self, target, dataset_name, evaluator_keywords:list, repetition, prefix, metadata=None):
         evaluators = [self.evaluators[keyword] for keyword in evaluator_keywords]
         results = self.client.evaluate(
             target,
             data=dataset_name,
             evaluators=evaluators,
             experiment_prefix=prefix,
-            num_repetitions=1,
+            num_repetitions=repetition,
             metadata=metadata
         )
         return results
