@@ -4,7 +4,7 @@ from data_loader.structured_data_loader import JsonLoader
 from model.retriever import FAISSBM25Retriever
 from model.openai_langchain import RAGChain
 from preprocessor.structured_data import json_to_langchain_doclist
-from database.table_manager import UserTableManager, ChatLogTableManager
+from database.table_manager import UserTableManager, ChatLogTableManager, EvalDBManager
 from model.eval import LLMJudge
 from model.prompts import rag_prompt_template
 
@@ -95,7 +95,7 @@ def user_login(db_user, db_chatlog):
         user_info = db_user.check_user(username, email)
         if user_info:
             st.session_state['user'] = {'id': user_info[0], 'email': user_info[2]}
-            st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
+            st.session_state['session_id'] = str(db_chatlog.get_new_session_id())
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
         else:
@@ -119,7 +119,7 @@ def user_join(db_user, db_chatlog):
         else:
             user_info = db_user.check_user(username, email)
             st.session_state['user'] = {'id': user_info[0], 'email': user_info[2]}
-            st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
+            st.session_state['session_id'] = str(db_chatlog.get_new_session_id())
             db_user.update_last_login(st.session_state['user']['id'])
             st.rerun()
 
@@ -146,7 +146,7 @@ def archive_chat(db_chatlog):
             # 현재 대화 초기화
             st.session_state.messages = []
             st.session_state['rag_chain'].reset_storage()
-            st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
+            st.session_state['session_id'] = str(db_chatlog.get_new_session_id())
             st.rerun()
 
 @st.cache_resource
@@ -249,7 +249,7 @@ def app():
                 st.session_state.messages = []
                 if 'show_chat_session' in st.session_state:
                     del st.session_state['show_chat_session']
-                st.session_state['session_id'] = str(db_chatlog.get_new_session_id(st.session_state['user']['id']))
+                st.session_state['session_id'] = str(db_chatlog.get_new_session_id())
                 st.session_state['rag_chain'].reset_storage()
                 print(f">>> 현 session_id: {st.session_state.session_id}")
 
@@ -321,9 +321,9 @@ def eval():
     retriever, rag_chain = None, None
     def target(inputs: dict) -> dict:
         # 평가할 응답 생성
-        retrieved_documents = retriever.search_docs(inputs['text'])
+        retrieved_documents = retriever.search_docs(inputs['question'])
         # RAG 5. Generate
-        response = rag_chain.get_response(message_inputs={'query': inputs['text'], 'context': retrieved_documents})
+        response = rag_chain.get_response(message_inputs={'query': inputs['question'], 'context': retrieved_documents})
         return {'response': response, 'documents': retrieved_documents}
     
     # app에서 서비스 중인 RAGset 문자열로
@@ -343,7 +343,7 @@ def eval():
     client = Client()
     # 데이터셋 불러오기
     dataset_generator = client.list_datasets()
-    datasets = [dataset.name for dataset in dataset_generator]
+    datasets = [dataset.name for dataset in dataset_generator if dataset.name.startswith("HG ")]
     # 평가 메트릭
     metrics = ['correctness', 'relevance', 'groundedness', 'retrieval_relevance']
     metric_instructions = """<b>🍊 Correctness</b><br/>모델의 응답이 정답과 유사한가<br/>
@@ -358,9 +358,10 @@ def eval():
 
     # 평가 전 세부 선택
     with st.container(border=True):
+        prefix = st.text_input("prefix", "RAG evaluation test")
+        description = st.text_input("description", "")
         eval_setting_cols = st.columns(2)
         with eval_setting_cols[0]:
-            prefix = st.text_input("prefix", "RAG evaluation test")
             test_RAGset['version'] = st.text_input("RAG version", "initial RAG Chain")
             st.write(fixed_metadata, unsafe_allow_html=True)
             test_RAGset['chunk_size'] = st.slider("chunk_size", 100, 1000, 300, 50)
@@ -371,7 +372,7 @@ def eval():
             selected_metrics = st.multiselect("사용할 평가 metric을 선택하세요.", metrics)
             repetition = st.slider("반복 횟수", 1, 5, 1, 1)
 
-        if st.button("run evaluation", type="primary", use_container_width=True):
+        if st.button("Run Evaluation", type="primary", use_container_width=True):
             if selected_metrics:
                 eval_status.update(label="평가 진행 중", state='running')
                 retriever = set_retriever(test_RAGset)
@@ -382,43 +383,67 @@ def eval():
                                         selected_metrics, 
                                         repetition=repetition,
                                         prefix=prefix,
+                                        description=description,
                                         metadata=test_RAGset)
                 eval_status.update(label="평가 완료!", state='complete')
+                # judge의 grade 전체 내용 저장
+                st.session_state['judge_response'] = judge.eval_results
             else:
                 st.toast("평가 metric을 선택하세요!")
-
+    
+    
     eval_result = st.session_state['eval_result']
-    # 평가 완료되면 결과 표시
+    
     if eval_result:
-        df = eval_result.to_pandas()
+        eval_result_df = eval_result.to_pandas()
+        judge_res = st.session_state['judge_response']
+        
+        # eval_result_df: 각 메트릭 평가 결과 column 이름 변경
+        col_to_rename = {f"feedback.{metric}": f"{metric}.grade" for metric in selected_metrics}
+        eval_result_df.rename(columns=col_to_rename, inplace=True)
+
+        # eval_result_df: judge_response의 explanation 추가 후 st.session_state에 백업
+        for metric in selected_metrics:
+            eval_result_df[f"{metric}.reason"] = [example['explanation'] for example in judge_res[metric]]
+        st.session_state['eval_df'] = eval_result_df
+
+        # 평가 전체 결과 점수 표시
         columns = st.columns(len(selected_metrics))
         for i in range(len(selected_metrics)):
-            columns[i].metric(selected_metrics[i], get_metric_ratio('feedback.' + selected_metrics[i], df))
+            columns[i].metric(selected_metrics[i], get_metric_ratio(f"{selected_metrics[i]}.grade", eval_result_df))
 
         st.divider()
-        questions = df.loc[:, 'inputs.text'].to_list()
+        questions = eval_result_df.loc[:, 'inputs.question'].to_list()
+        
+        # 세부 결과 확인
         selected_question = st.selectbox("세부 결과를 확인할 질문을 선택하세요.", questions)
         selected_i = questions.index(selected_question)
         st.text("")
     if selected_i:
+        question = eval_result_df.loc[selected_i, 'inputs.question']
+        response = eval_result_df.loc[selected_i, 'outputs.response']
+        documents = eval_result_df.loc[selected_i, 'outputs.documents']
+        truth = eval_result_df.loc[selected_i, 'reference.ground_truth']
+        st.subheader(question)
         columns = st.columns(len(selected_metrics))
         for i in range(len(selected_metrics)):
-            value = df.loc[selected_i, 'feedback.' + selected_metrics[i]]
+            value = eval_result_df.loc[selected_i, f"{selected_metrics[i]}.grade"]
             columns[i].metric(selected_metrics[i], value)
-        st.text("")
-        question = df.loc[selected_i, 'inputs.text']
-        response = df.loc[selected_i, 'outputs.response']
-        documents = df.loc[selected_i, 'outputs.documents']
-        truth = df.loc[selected_i, 'reference.label']
-        st.subheader(question)
+        
+        # 세부 내용 보여주기
         st.markdown("<h4>🍊 truth</h4>", unsafe_allow_html=True)
         st.markdown(truth, unsafe_allow_html=True)
         st.markdown("<h4>🍊 response</h4>", unsafe_allow_html=True)
         st.markdown(response, unsafe_allow_html=True)
-        st.markdown("<h4>🍊 retrieved documents</h4>", unsafe_allow_html=True)
-        for document in documents:
-            st.json(document.metadata)
-            st.text(document.page_content)
+        for i in range(len(documents)):
+            st.markdown(f"<h4>🍊 retrieved document {i+1}</h4>", unsafe_allow_html=True)
+            st.json(documents[i].metadata)
+            st.text(documents[i].page_content)
+        st.write("---")
+        for metric in selected_metrics:
+            st.markdown(f"<h4>🍊 {metric}: {eval_result_df.loc[selected_i, f'{metric}.grade']}</h4>", unsafe_allow_html=True)
+            st.write(eval_result_df.loc[selected_i, f"{metric}.reason"])
+
 
 
 def main():
