@@ -1,5 +1,32 @@
 from database.config import *
 import pymysql
+from sqlalchemy import create_engine
+
+class EvalDBManager:
+    def __init__(self):
+        pymysql_conn = pymysql.connect(
+            host=DB_HOST,
+            port=int(DB_PORT),
+            user=DB_USER,
+            password=DB_PASSWORD,
+        )
+        self.eval_db_name = 'hgcb_env'
+        
+        # 'hgcb_eval' 데이터베이스 조회/생성
+        try:
+            with pymysql_conn.cursor() as cursor:
+                cursor.execute("SHOW DATABASES;")
+                databases = [db[0] for db in cursor.fetchall()]
+                if self.eval_db_name not in databases:
+                    cursor.execute(f"CREATE DATABASE {self.eval_db_name};")
+        finally:
+            pymysql_conn.close()
+
+        db_connection_str = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}]@{DB_HOST}/{self.eval_db_name}"
+        self.engine = create_engine(db_connection_str)
+    
+    def save_df(self, df, table_name):
+        df.to_sql(con=self.engine, name=table_name, if_exists='append', index=False)
 
 class BaseTableManager:
     def __init__(self):
@@ -117,16 +144,15 @@ class ChatLogTableManager(BaseTableManager):
         finally:
             self.close()
 
-    def get_new_session_id(self, user_id):
-        # 사용자의 마지막 session_id를 가져와 1을 더해 새로운 session_id 반환
+    def get_new_session_id(self):
+        # 마지막 session_id를 가져와 1을 더해 새로운 session_id 반환
         self.connect()
         sql = """
         SELECT MAX(session_id) AS last_session
         FROM chat_title
-        WHERE user_id = %s
         """
         try:
-            self.cursor.execute(sql, (user_id,))
+            self.cursor.execute(sql)
             result = self.cursor.fetchone()
             last_session_id = result[0] if result[0] else 0
             return last_session_id + 1

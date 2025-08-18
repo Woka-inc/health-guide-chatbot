@@ -4,6 +4,9 @@ from typing_extensions import Annotated, TypedDict
 from model.openai_langchain import BaseOpenAIChain
 from preprocessor.similarity import EmbeddingsSimilarity
 
+default_model = 'gpt-4.1'
+default_temperature = 1
+
 class CorrectnessGrade(TypedDict):
     explanation: Annotated[str, ..., "Explain your reasoning for the score"]
     example_result: Annotated[bool, ..., "True if the answer is correct, False otherwise."]
@@ -23,7 +26,7 @@ class RetrievalRelevanceGrade(TypedDict):
 class LLMJudge():
     def __init__(self, openai_api_key):
         self.openai_api_key = openai_api_key
-        self.llm = ChatOpenAI(api_key=openai_api_key, model='gpt-4o', temperature=0)
+        self.llm = ChatOpenAI(api_key=openai_api_key, model=default_model, temperature=default_temperature)
         self.client = Client()
         self.evaluators = {
             "correctness": self.correctness,
@@ -31,12 +34,6 @@ class LLMJudge():
             "groundedness": self.groundedness,
             "retrieval_relevance": self.retrieval_relevance,
         }
-        self.eval_results = {
-            'correctness':[], 
-            'relevance': [],
-            'groundedness': [], 
-            'retrieval_relevance': []
-            }
     
     def correctness(self, inputs:dict, outputs:dict, reference_outputs:dict) -> bool:
         grader_llm = self.llm.with_structured_output(CorrectnessGrade, method='json_schema', strict=True)
@@ -191,7 +188,7 @@ Your task is to identify the disease mentioned in either a document title or a u
 Now, extract the disease name based on the given input and return it in Korean."""),
         ("user", "{text_type}: \"{text}\"")
         ]
-        disease_extractor_llm = BaseOpenAIChain(messages=disease_extractor_msg, api_key=self.openai_api_key, model='gpt-4o-mini')
+        disease_extractor_llm = BaseOpenAIChain(messages=disease_extractor_msg, api_key=self.openai_api_key, model=default_model, temperature=default_temperature)
         for doc in outputs['documents']:
             doc.metadata['relevant_disease'] = disease_extractor_llm.get_response(
                 {"text_type": "Document Title", "text": doc.metadata['title']}
@@ -263,6 +260,12 @@ Avoid simply stating the correct answer at the outset.
         return grade['example_result']
     
     def evaluate(self, target, dataset_name, evaluator_keywords:list, repetition, prefix, description, metadata=None):
+        self.eval_results = {
+            'correctness':[], 
+            'relevance': [],
+            'groundedness': [], 
+            'retrieval_relevance': []
+        }
         evaluators = [self.evaluators[keyword] for keyword in evaluator_keywords]
         results = self.client.evaluate(
             target,

@@ -13,8 +13,11 @@ from langsmith import Client
 
 import streamlit as st
 from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
 import inspect
 import os
+import time
 
 # st.session_state 목록
 # - OPENAI_API_KEY: 모델에 사용할 OpenAI API Key. 환경변수로부터 로드하거나 사용자에게 입력 받음
@@ -32,7 +35,8 @@ serviced_RAGset = {
     "retriever": FAISSBM25Retriever,
     "top_k": 2,
     "prompt": "1.0",
-    "llm": "gpt-4o"
+    "llm": "gpt-4.1",
+    "eval_rep": 1   # 평가 반복 횟ㅜ
 }
 
 def crawl_and_save(crawler, save_path, force_crawl=False, **kwargs):
@@ -315,7 +319,7 @@ def app():
 
 def eval():
     if 'eval_result' not in st.session_state:
-        st.session_state['eval_result'] = None
+        st.session_state['eval_result'] = []
 
     # 평가할 대상 준비 (streamlit 쓰지 않아야 함)
     retriever, rag_chain = None, None
@@ -334,7 +338,7 @@ def eval():
     test_RAGset = serviced_RAGset
 
     # 모델 선택 옵션
-    llm_options = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini']
+    llm_options = ['gpt-4.1', 'gpt-4o-mini', 'o1', 'o1-mini']
 
     # 수정할 수 없는 RAGset 설정 (metadata)
     fixed_keys = ['splitter', 'retriever', 'prompt']
@@ -343,7 +347,7 @@ def eval():
     client = Client()
     # 데이터셋 불러오기
     dataset_generator = client.list_datasets()
-    datasets = [dataset.name for dataset in dataset_generator if dataset.name.startswith("HG ")]
+    datasets = [dataset.name for dataset in dataset_generator]
     # 평가 메트릭
     metrics = ['correctness', 'relevance', 'groundedness', 'retrieval_relevance']
     metric_instructions = """<b>🍊 Correctness</b><br/>모델의 응답이 정답과 유사한가<br/>
@@ -353,8 +357,7 @@ def eval():
     """
     st.sidebar.markdown(metric_instructions, unsafe_allow_html=True)
 
-    eval_result, selected_i = None, None
-    eval_status = st.status("세부 설정 후 run evaluation을 클릭하세요.", state='complete')
+    eval_result_reps, selected_i = None, None
 
     # 평가 전 세부 선택
     with st.container(border=True):
@@ -366,85 +369,137 @@ def eval():
             st.write(fixed_metadata, unsafe_allow_html=True)
             test_RAGset['chunk_size'] = st.slider("chunk_size", 100, 1000, 300, 50)
             test_RAGset['top_k'] = int(st.slider("top_k (EnsembleRetriever 사용 중이므로 2배수로 가능)", 2, 10, 2, 2) / 2) # 앙상블이라 2개씩
-            test_RAGset['llm'] = st.pills("model", llm_options)
         with eval_setting_cols[1]:
-            selected_database = st.selectbox("사용할 dataset을 선택하세요", datasets)
+            selected_dataset = st.selectbox("사용할 dataset을 선택하세요", datasets)
             selected_metrics = st.multiselect("사용할 평가 metric을 선택하세요.", metrics)
-            repetition = st.slider("반복 횟수", 1, 5, 1, 1)
+            test_RAGset['llm'] = st.pills("model", llm_options)
+            repetition = test_RAGset['eval_rep']
 
+        eval_status = st.status("세부 설정 후 Run Evaluation을 클릭하세요.", state='complete')
         if st.button("Run Evaluation", type="primary", use_container_width=True):
             if selected_metrics:
+                start_time = time.time()
                 eval_status.update(label="평가 진행 중", state='running')
                 retriever = set_retriever(test_RAGset)
                 rag_chain = set_chain(test_RAGset)
                 judge = LLMJudge(st.session_state['OPENAI_API_KEY'])
-                st.session_state['eval_result'] = judge.evaluate(target, 
-                                        selected_database, 
-                                        selected_metrics, 
-                                        repetition=repetition,
-                                        prefix=prefix,
-                                        description=description,
-                                        metadata=test_RAGset)
+                st.session_state['eval_result'] = []
+                st.session_state['judge_response'] = []
+                prog_bar_txt = "평가 진행 중입니다."
+                rep_step = 1.0 / (test_RAGset['eval_rep'] + 1)
+                eval_rep_prog_bar = st.progress(0, text=prog_bar_txt)
+                for rep in range(repetition):
+                    eval_rep_prog_bar.progress(rep_step * (rep + 1), text=f"{prog_bar_txt} rep: {rep + 1} / {test_RAGset['eval_rep']}")
+                    st.session_state['eval_result'].append(judge.evaluate(
+                        target,
+                        selected_dataset,
+                        selected_metrics,
+                        repetition=1,
+                        prefix=f"{prefix} (rep {rep})",
+                        description=description,
+                        metadata=test_RAGset)
+                    )
+                    # judge의 grade 전체 내용 저장
+                    st.session_state['judge_response'].append(judge.eval_results)
+                end_time = time.time()
+                st.write(f">>> 평가 소요 시간: {end_time - start_time}초")
+                eval_rep_prog_bar.progress(1.0, text="평가 완료!")
                 eval_status.update(label="평가 완료!", state='complete')
-                # judge의 grade 전체 내용 저장
-                st.session_state['judge_response'] = judge.eval_results
             else:
                 st.toast("평가 metric을 선택하세요!")
     
+    eval_result_reps = st.session_state['eval_result']
     
-    eval_result = st.session_state['eval_result']
-    
-    if eval_result:
-        eval_result_df = eval_result.to_pandas()
-        judge_res = st.session_state['judge_response']
-        
-        # eval_result_df: 각 메트릭 평가 결과 column 이름 변경
+    if eval_result_reps:
+        eval_rep_dfs = [rep_result.to_pandas() for rep_result in eval_result_reps]
+        judge_rep_res = st.session_state['judge_response']
+        rep_n = len(st.session_state['eval_result'])
+        ex_n = eval_rep_dfs[0].shape[0]
+
+        # 각 eval_rep_dfs 메트릭 평가 결과 column 이름 변경 
         col_to_rename = {f"feedback.{metric}": f"{metric}.grade" for metric in selected_metrics}
-        eval_result_df.rename(columns=col_to_rename, inplace=True)
+        for rep in range(rep_n):
+            eval_rep_dfs[rep].rename(columns=col_to_rename, inplace=True)
 
-        # eval_result_df: judge_response의 explanation 추가 후 st.session_state에 백업
+        # 모든 repetition 통합한 dataframe(eval_df) 만들기: 공통 칼럼 추가
+        rep_df_cols = eval_rep_dfs[0].columns
+        col_for_ex = ['inputs.question', 'reference.ground_truth', 'example_id']    # example 별로 같은 항목
+        eval_df = eval_rep_dfs[0].loc[:, col_for_ex]
+
+        # repetition마다 다른 값들 모으기
+        rep_values = {col: [] for col in rep_df_cols if col not in col_for_ex}
+        for ex_i in range(ex_n):
+            for col in rep_values:
+                rep_values[col].append([eval_rep_dfs[rep].loc[ex_i, col] for rep in range(rep_n)])
+        for col in rep_values.keys():
+            eval_df[col] = rep_values[col]
+        # example의 evaluation reason(in judge_response) repetitions로 나눠진 것 모아 합치기
         for metric in selected_metrics:
-            eval_result_df[f"{metric}.reason"] = [example['explanation'] for example in judge_res[metric]]
-        st.session_state['eval_df'] = eval_result_df
-
+            eval_df[f"{metric}.reason"] = [
+                [judge_rep_res[rep][metric][ex_i]['explanation'] for rep in range(rep_n)]
+                for ex_i in range(ex_n)
+            ]
+        # example별로 metric 평균, 표준편차 구하기
+        for metric in selected_metrics:
+            eval_df[f"{metric}.mean"] = eval_df[f"{metric}.grade"].apply(np.mean)
+            eval_df[f"{metric}.std"] = eval_df[f"{metric}.grade"].apply(np.std)
+        # metric별로 평균, 표준편차 구하기
+        eval_scores = {}
+        for metric in selected_metrics:
+            score_list = [
+                np.mean([rep_grades[rep] for rep_grades in eval_df[f"{metric}.grade"]])
+                for rep in range(rep_n)
+            ]
+            eval_scores[f"{metric}.mean"] = np.mean(score_list)
+            eval_scores[f"{metric}.std"] = np.std(score_list)
+        
         # 평가 전체 결과 점수 표시
         columns = st.columns(len(selected_metrics))
         for i in range(len(selected_metrics)):
-            columns[i].metric(selected_metrics[i], get_metric_ratio(f"{selected_metrics[i]}.grade", eval_result_df))
+            metric = selected_metrics[i]
+            columns[i].metric(f"**{metric}** μ", round(eval_scores[f"{metric}.mean"], 2))
+            columns[i].metric(f"**{metric}** σ", round(eval_scores[f"{metric}.std"], 2))
 
         st.divider()
-        questions = eval_result_df.loc[:, 'inputs.question'].to_list()
-        
-        # 세부 결과 확인
+
+        # example별 세부 결과 확인: example 선택창
+        questions = eval_df.loc[:, 'inputs.question'].to_list()
         selected_question = st.selectbox("세부 결과를 확인할 질문을 선택하세요.", questions)
         selected_i = questions.index(selected_question)
-        st.text("")
-    if selected_i:
-        question = eval_result_df.loc[selected_i, 'inputs.question']
-        response = eval_result_df.loc[selected_i, 'outputs.response']
-        documents = eval_result_df.loc[selected_i, 'outputs.documents']
-        truth = eval_result_df.loc[selected_i, 'reference.ground_truth']
-        st.subheader(question)
-        columns = st.columns(len(selected_metrics))
-        for i in range(len(selected_metrics)):
-            value = eval_result_df.loc[selected_i, f"{selected_metrics[i]}.grade"]
-            columns[i].metric(selected_metrics[i], value)
+    
+    # 평가 후 선택한 example에 대해 세부 결과 표시
+    if selected_i is not None:
+        question = eval_df.loc[selected_i, 'inputs.question']
+        truth = eval_df.loc[selected_i, 'reference.ground_truth']
         
-        # 세부 내용 보여주기
+        st.subheader(question)
         st.markdown("<h4>🍊 truth</h4>", unsafe_allow_html=True)
         st.markdown(truth, unsafe_allow_html=True)
-        st.markdown("<h4>🍊 response</h4>", unsafe_allow_html=True)
-        st.markdown(response, unsafe_allow_html=True)
-        for i in range(len(documents)):
-            st.markdown(f"<h4>🍊 retrieved document {i+1}</h4>", unsafe_allow_html=True)
-            st.json(documents[i].metadata)
-            st.text(documents[i].page_content)
-        st.write("---")
+
+        index = index=[f"반복 {i + 1}" for i in range(rep_n)]
+        index.append("평균")
+        q_df = pd.DataFrame(index=([f"반복 {i + 1}" for i in range(rep_n)] + ["평균"]))
         for metric in selected_metrics:
-            st.markdown(f"<h4>🍊 {metric}: {eval_result_df.loc[selected_i, f'{metric}.grade']}</h4>", unsafe_allow_html=True)
-            st.write(eval_result_df.loc[selected_i, f"{metric}.reason"])
-
-
+            q_df[metric] = eval_df.loc[selected_i, f'{metric}.grade'] + [round(eval_df.loc[selected_i, f'{metric}.mean'], 2)]
+        st.markdown("<h4>🍊 metric별 반복 평가 결과</h4>", unsafe_allow_html=True)
+        st.table(q_df)
+        
+        # 각 반복별 세부 내용 표시
+        rep_tabs = st.tabs([f"반복 {i + 1}" for i in range(rep_n)])
+        for rep in range(rep_n):
+            tab = rep_tabs[rep]
+            response = eval_df.loc[selected_i, 'outputs.response'][rep]
+            documents = eval_df.loc[selected_i, 'outputs.documents'][rep]
+            tab.markdown("<h4>🍊 response</h4>", unsafe_allow_html=True)
+            tab.markdown(response, unsafe_allow_html=True)
+            for i in range(len(documents)):
+                tab.markdown(f"<h4>🍊 retrieved document {i+1}</h4>", unsafe_allow_html=True)
+                tab.json(documents[i].metadata)
+                tab.text(documents[i].page_content)
+            tab.write("---")
+            for metric in selected_metrics:
+                tab.markdown(f"<h4>🍊 {metric}: {eval_df.loc[selected_i, f'{metric}.grade'][rep]}</h4>", unsafe_allow_html=True)
+                tab.write(eval_df.loc[selected_i, f"{metric}.reason"][rep])
 
 def main():
     st.set_page_config(page_title="Health Guide ChatBot | Woka")
