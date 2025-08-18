@@ -5,13 +5,15 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain.memory import ConversationBufferMemory
 from preprocessor.image import get_resized_img, encode_bytesio_to_base64
 
+default_model = 'gpt-4.1'
+
 class BaseOpenAIChain():
-    def __init__(self, messages, api_key, model='gpt-4o'):
+    def __init__(self, messages, api_key, model=default_model, temperature=0.2):
         """
         messages: [("system", "..."), ("user", "...")] 형식의 message 리스트
         """
         prompt = ChatPromptTemplate.from_messages(messages)
-        model = ChatOpenAI(model=model, api_key=api_key)
+        model = ChatOpenAI(model=model, temperature=temperature, api_key=api_key)
         self.chain = prompt | model
     
     def get_response(self, message_inputs):
@@ -22,8 +24,8 @@ class BaseOpenAIChain():
         return response.content
     
 class RAGChain(BaseOpenAIChain):
-    def __init__(self, prompt_messages, api_key, model='gpt-4o'):
-        super().__init__(prompt_messages, api_key)
+    def __init__(self, prompt_messages, api_key, model=default_model):
+        super().__init__(prompt_messages, api_key, model)
         self.session_storage = {}
     
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
@@ -65,7 +67,7 @@ class RAGChain(BaseOpenAIChain):
         self.session_storage = {}
 
 class ImageDescriptionChain(BaseOpenAIChain):
-    def __init__(self, system_prompt, api_key, model='gpt-4o'):
+    def __init__(self, system_prompt, api_key, model=default_model):
         messages = [
             ("system", system_prompt),
             ("user", "{user_query}"),
