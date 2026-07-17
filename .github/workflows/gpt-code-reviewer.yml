@@ -14,17 +14,17 @@ jobs:
 
     steps:
       - name: Checkout project repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
 
       - name: Checkout gpt-code-reviewer repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           repository: NaA-hwang/gpt-code-reviewer # gpt-code-reviewer 리포지토리
           branch: main
           path: gpt-code-reviewer
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v7
         with:
           node-version: "16"
 
